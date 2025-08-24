@@ -251,47 +251,56 @@ chrome.alarms.onAlarm.addListener(async (a) => {
 async function openInactiveTabAndSnapshot(incidentId) {
   const url = `https://lynx.office.net/incident/${encodeURIComponent(incidentId)}`;
   let tabId = null;
+  let onSnapshotListener = null;
+  let timeoutId = null;
+
+  const cleanup = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (onSnapshotListener) chrome.runtime.onMessage.removeListener(onSnapshotListener);
+    if (tabId) {
+      const closingTabId = tabId;
+      chrome.tabs.remove(closingTabId).catch(e => {
+        console.error(`[${new Date().toISOString()}] Failed to remove tab ${closingTabId} for incident ${incidentId}.`, e);
+      });
+      tabId = null;
+    }
+  };
 
   return new Promise(async (resolve) => {
-    const timeout = setTimeout(() => {
-      cleanupAndFail("TIMEOUT");
-    }, 90000); // 90秒でタイムアウト
-
-    const onSnapshot = async (msg, sender) => {
+    onSnapshotListener = async (msg, sender) => {
       if (msg?.type === "snapshotFromCS" && sender.tab?.id === tabId && msg.payload?.incidentId === incidentId) {
-        const result = await handleSnapshotFromCS(msg.payload);
-        cleanup();
-        resolve(result);
+        try {
+          const result = await handleSnapshotFromCS(msg.payload);
+          resolve(result);
+        } catch (e) {
+          console.error(`[${new Date().toISOString()}] Error in handleSnapshotFromCS for ${incidentId}.`, e);
+          resolve({ ok: false, changed: false, note: `HANDLE_ERROR: ${e.message}` });
+        } finally {
+          cleanup();
+        }
       }
     };
 
-    const cleanup = () => {
-      clearTimeout(timeout);
-      chrome.runtime.onMessage.removeListener(onSnapshot);
-      if (tabId) {
-        chrome.tabs.remove(tabId).catch(() => {});
-        tabId = null;
-      }
-    };
-
-    const cleanupAndFail = async (note) => {
-      const rt = await getRuntime();
-      rt.lastCheckAt[incidentId] = Date.now();
-      rt.lastStatus[incidentId] = { ok: false, changed: false, note };
-      await setRuntime(rt);
-      chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(() => {});
-      cleanup();
-      resolve(rt.lastStatus[incidentId]);
-    };
+    timeoutId = setTimeout(() => {
+      const note = "TIMEOUT";
+      cleanup(); // cleanup first
+      getRuntime().then(rt => {
+        rt.lastCheckAt[incidentId] = Date.now();
+        rt.lastStatus[incidentId] = { ok: false, changed: false, note };
+        setRuntime(rt).then(() => {
+          chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(() => {});
+          resolve(rt.lastStatus[incidentId]);
+        });
+      });
+    }, 90000);
 
     try {
-      chrome.runtime.onMessage.addListener(onSnapshot);
+      chrome.runtime.onMessage.addListener(onSnapshotListener);
       const wins = await chrome.windows.getAll({ populate: false, windowTypes: ["normal"] });
       const targetWindowId = wins.length > 0 ? wins[0].id : (await chrome.windows.create({ focused: false })).id;
       const tab = await chrome.tabs.create({ url, active: false, windowId: targetWindowId });
       tabId = tab.id;
 
-      // タブのロード完了を待ってから注入
       await new Promise(res => {
         const listener = (tid, info) => {
           if (tid === tabId && info.status === "complete") {
@@ -307,7 +316,16 @@ async function openInactiveTabAndSnapshot(incidentId) {
         files: ["content-script.js"],
       });
     } catch (e) {
-      cleanupAndFail(`ERROR: ${e?.message || e}`);
+      const note = `ERROR: ${e?.message || e}`;
+      cleanup(); // cleanup first
+      getRuntime().then(rt => {
+        rt.lastCheckAt[incidentId] = Date.now();
+        rt.lastStatus[incidentId] = { ok: false, changed: false, note };
+        setRuntime(rt).then(() => {
+          chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(() => {});
+          resolve(rt.lastStatus[incidentId]);
+        });
+      });
     }
   });
 }
