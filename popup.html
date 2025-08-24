@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Incident Watcher</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="head">
+    <div class="title">Incident Watcher</div>
+    <div class="sub">M365 Lynx incident monitor</div>
+  </header>
+
+  <section class="config">
+    <textarea id="ids" rows="5" class="mono" placeholder="TM1139221 TM1234567 ...（空白/改行/カンマ区切り）"></textarea>
+    <div class="toolbar">
+      <label>チェック間隔(分): <input id="interval" type="number" min="1" step="1" class="num"></label>
+      <label><input id="bgEnabled" type="checkbox"> 背景監視</label>
+      <div class="spacer"></div>
+      <button id="saveBtn" class="btn primary">保存</button>
+      <button id="pokeBtn" class="btn">今すぐ検知</button>
+      <button id="testNotifyBtn" class="btn">通知テスト</button>
+      <button id="diagBtn" class="btn">診断</button>
+    </div>
+  </section>
+
+  <section class="status">
+    <pre id="statusBox" class="mono"></pre>
+  </section>
+
+  <section class="results">
+    <table class="grid">
+      <thead>
+        <tr><th>ID</th><th>最終チェック</th><th>今回の判定</th><th>備考</th><th>操作</th></tr>
+      </thead>
+      <tbody id="resultBody"></tbody>
+    </table>
+  </section>
+
+  <!-- プレビュー用モーダル -->
+  <div id="previewModal" class="modal">
+    <div class="card">
+      <div class="cardHead">
+        <div class="mono" id="pvTitle">Preview</div>
+        <button id="pvClose" class="btn">閉じる</button>
+      </div>
+      <div class="tabs">
+        <div class="group">
+          <button id="tabTextLatest"  class="tab active">Text: 最新</button>
+          <button id="tabTextPrev"    class="tab">Text: 前回</button>
+          <button id="tabTextDiff"    class="tab">Text: 差分</button>
+        </div>
+        <div class="group">
+          <button id="tabHtmlLatest"  class="tab">HTML: 最新</button>
+          <button id="tabHtmlPrev"    class="tab">HTML: 前回</button>
+        </div>
+      </div>
+      <div id="pvArea">
+        <pre id="pvText" class="mono"></pre>
+        <iframe id="pvHtml" sandbox="allow-same-origin" class="htmlframe" style="display:none"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,372 @@
+// background.js v1.4.0-seq + robust waits
+const DEFAULT_INTERVAL_MINUTES = 10;
+
+const DEFAULT_SETTINGS = {
+  incidentIds: [],
+  rawIdsText: "",
+  intervalMinutes: DEFAULT_INTERVAL_MINUTES,
+  bgPollingEnabled: true
+};
+
+const DEFAULT_RUNTIME = {
+  lastHashes: {},
+  lastChangeAt: {},
+  lastSnapshot: {},   // text
+  prevSnapshot: {},   // text
+  lastHtml: {},       // html (sanitized)
+  prevHtml: {},       // html (sanitized)
+  lastCheckAt: {},
+  lastStatus: {},
+  lastRunAt: null
+};
+
+const ALARM_NAME = "incident-bg-poll";
+const IMMEDIATE_ALARM_NAME = "incident-bg-poll-now";
+
+const ICON_CANDIDATES = [
+  () => chrome.runtime.getURL("icons/icon128.png"),
+  () => chrome.runtime.getURL("icons/icon48.png"),
+  () => chrome.runtime.getURL("icons/icon32.png"),
+  () => chrome.runtime.getURL("icons/icon16.png"),
+  () => null
+];
+
+async function createNotificationBase(opts) {
+  let lastErr = null;
+  for (const getUrl of ICON_CANDIDATES) {
+    try {
+      const iconUrl = getUrl();
+      const payload = iconUrl ? { ...opts, iconUrl } : { ...opts };
+      const id = opts.id || `n:${Date.now()}`;
+      await chrome.notifications.create(id, payload);
+      return { ok: true, used: iconUrl || "(none)" };
+    } catch (e) { lastErr = e; }
+  }
+  return { ok: false, error: lastErr?.message || String(lastErr) || "unknown" };
+}
+
+async function getSettings() {
+  const { settings } = await chrome.storage.sync.get("settings");
+  return { ...DEFAULT_SETTINGS, ...(settings || {}) };
+}
+async function setSettings(next) {
+  const cur = await getSettings();
+  const merged = { ...cur, ...(next || {}) };
+  await chrome.storage.sync.set({ settings: merged });
+  return merged;
+}
+async function getRuntime() {
+  const { runtime } = await chrome.storage.local.get("runtime");
+  return { ...DEFAULT_RUNTIME, ...(runtime || {}) };
+}
+async function setRuntime(patch) {
+  const cur = await getRuntime();
+  const merged = { ...cur, ...(patch || {}) };
+  await chrome.storage.local.set({ runtime: merged });
+  return merged;
+}
+
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function sanitizeText(t) {
+  return (t || "")
+    .replace(/\s+/g, " ")
+    .replace(/request[-_ ]?id[:=]?\s*[a-f0-9-]+/ig, "")
+    .replace(/updated[:=]?\s*\d{4}-\d{2}-\d{2}[ t]\d{2}:\d{2}:\d{2}(?:\.\d+)?z?/ig, "")
+    .trim();
+}
+
+// シンプルサニタイズ（script/iframe/イベント属性除去）
+function sanitizeHtml(html) {
+  try {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    doc.querySelectorAll("script, iframe, object, embed").forEach(el => el.remove());
+    doc.querySelectorAll("*").forEach(el => {
+      [...el.attributes].forEach(attr => {
+        if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+      });
+    });
+    let base = doc.querySelector("base");
+    if (!base) {
+      base = doc.createElement("base");
+      base.setAttribute("href", "https://lynx.office.net/");
+      doc.head && doc.head.prepend(base);
+    }
+    doc.querySelectorAll("a[target]").forEach(a => a.removeAttribute("target"));
+    doc.querySelectorAll('meta[http-equiv="refresh"]').forEach(m => m.remove());
+    return "<!doctype html>\n" + doc.documentElement.outerHTML;
+  } catch {
+    return String(html || "");
+  }
+}
+
+async function notifyChange(incidentId, title, hint) {
+  const res = await createNotificationBase({
+    type: "basic",
+    title: `${title || `Incident ${incidentId}`} が更新されました`,
+    message: (hint || "更新を検知しました").slice(0, 250),
+    priority: 2,
+    id: `incident:${incidentId}:${Date.now()}`
+  });
+  chrome.notifications.onClicked.addListener((clickedId) => {
+    if (clickedId && String(clickedId).startsWith("incident:")) {
+      const id = clickedId.split(":")[1];
+      const url = `https://lynx.office.net/incident/${encodeURIComponent(id)}`;
+      chrome.tabs.create({ url });
+    }
+  });
+  return res;
+}
+
+async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotHtml }) {
+  const now = Date.now();
+  const runtime = await getRuntime();
+  const result = { ok: false, changed: false, note: "" };
+
+  // 空テキストは NO_SNAPSHOT
+  if (!incidentId || !snapshotText || !snapshotText.trim()) {
+    result.ok = false; result.note = "NO_SNAPSHOT";
+  } else {
+    const normText = sanitizeText(snapshotText);
+    const hash = await sha256Hex(normText);
+    const prevHash = runtime.lastHashes[incidentId];
+    const safeHtml = sanitizeHtml(snapshotHtml || "");
+
+    if (prevHash && prevHash !== hash) {
+      runtime.prevSnapshot[incidentId] = runtime.lastSnapshot[incidentId] || "";
+      runtime.prevHtml[incidentId] = runtime.lastHtml[incidentId] || "";
+      runtime.lastChangeAt[incidentId] = now;
+      result.changed = true;
+      await notifyChange(incidentId, title || `Incident ${incidentId}`, normText.slice(0, 200));
+    }
+
+    runtime.lastHashes[incidentId]   = hash;
+    runtime.lastSnapshot[incidentId] = normText;
+    runtime.lastHtml[incidentId]     = safeHtml;
+
+    result.ok = true;
+    result.note = normText.slice(0, 120);
+  }
+  runtime.lastCheckAt[incidentId] = now;
+  runtime.lastStatus[incidentId] = { ...result };
+  await setRuntime(runtime);
+
+  chrome.runtime.sendMessage({ type: "bgResult", incidentId, result }).catch(()=>{});
+  return result;
+}
+
+async function rescheduleAlarm() {
+  const s = await getSettings();
+  await chrome.alarms.clear(ALARM_NAME);
+  await chrome.alarms.clear(IMMEDIATE_ALARM_NAME);
+  if (s.bgPollingEnabled) {
+    const period = Math.max(1, Number(s.intervalMinutes) || DEFAULT_INTERVAL_MINUTES);
+    await chrome.alarms.create(ALARM_NAME, { periodInMinutes: period });
+  }
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  const { settings } = await chrome.storage.sync.get("settings");
+  if (!settings) await chrome.storage.sync.set({ settings: DEFAULT_SETTINGS });
+  const { runtime } = await chrome.storage.local.get("runtime");
+  if (!runtime) await chrome.storage.local.set({ runtime: DEFAULT_RUNTIME });
+  await rescheduleAlarm();
+  chrome.action.setBadgeText({ text: "" });
+});
+chrome.runtime.onStartup?.addListener(async () => { await rescheduleAlarm(); });
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.settings) rescheduleAlarm();
+});
+
+let queueRunning = false;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// 逐次：同一バッチ内で連続処理
+async function pollOnceAll() {
+  const s = await getSettings();
+  if (!s.bgPollingEnabled) return;
+  const ids = (s.incidentIds || []).map(x => x.trim()).filter(Boolean);
+  if (!ids.length) return;
+  if (queueRunning) return;
+  queueRunning = true;
+
+  chrome.runtime.sendMessage({ type: "bgStart", ids }).catch(()=>{});
+  let changedCount = 0;
+
+  try {
+    for (const id of ids) {
+      const r = await openInactiveTabAndSnapshot(id);
+      if (r?.changed) changedCount++;
+      await sleep(150);
+    }
+  } finally {
+    const now = Date.now();
+    const rt = await getRuntime();
+    rt.lastRunAt = now;
+    await setRuntime(rt);
+    chrome.action.setBadgeText({ text: changedCount ? String(Math.min(99, changedCount)) : "" });
+    chrome.runtime.sendMessage({ type: "bgDone", changedCount, at: now }).catch(()=>{});
+    queueRunning = false;
+  }
+}
+
+chrome.alarms.onAlarm.addListener(async (a) => {
+  if (a.name === ALARM_NAME || a.name === IMMEDIATE_ALARM_NAME) {
+    chrome.runtime.sendMessage({ type: "bgTick", name: a.name, when: Date.now() }).catch(()=>{});
+    await pollOnceAll();
+    if (a.name === IMMEDIATE_ALARM_NAME) await chrome.alarms.clear(IMMEDIATE_ALARM_NAME);
+  }
+});
+
+async function openInactiveTabAndSnapshot(incidentId) {
+  const url = `https://lynx.office.net/incident/${encodeURIComponent(incidentId)}`;
+  const wins = await chrome.windows.getAll({ populate: false, windowTypes: ["normal"] });
+  let targetWindowId = wins.length ? wins[0].id : (await chrome.windows.create({ focused: false })).id;
+
+  const tab = await chrome.tabs.create({ url, active: false, windowId: targetWindowId });
+  const tabId = tab.id;
+  let finished = false;
+  let lastResult = null;
+  let loadCompleteAt = 0;
+
+  const onUpdated = (tid, info) => {
+    if (tid === tabId) {
+      if (info.status === "complete") loadCompleteAt = Date.now();
+    }
+  };
+  const onSnapshot = async (msg, sender) => {
+    if (msg?.type === "snapshotFromCS" && sender.tab && sender.tab.id === tabId && msg.payload?.incidentId === incidentId) {
+      lastResult = await handleSnapshotFromCS(msg.payload);
+      finished = true;
+      cleanup();
+    }
+  };
+  function cleanup() {
+    chrome.tabs.onUpdated.removeListener(onUpdated);
+    chrome.runtime.onMessage.removeListener(onSnapshot);
+    chrome.tabs.remove(tabId, () => {});
+  }
+
+  chrome.tabs.onUpdated.addListener(onUpdated);
+  chrome.runtime.onMessage.addListener(onSnapshot);
+
+  const started = Date.now();
+  // 1) 初回ロード完了を最大 30s 待つ
+  while (!loadCompleteAt && Date.now() - started < 30000) await sleep(200);
+
+  // 2) 完了後も SPA の初期描画を 5s ほど猶予
+  if (loadCompleteAt) {
+    await sleep(5000);
+    await ensureInjectedAndPoke(tabId);
+  }
+
+  // 3) 最大 90s 粘る（45s でハードリロード→再注入）
+  while (!finished && Date.now() - started < 90000) {
+    const elapsed = Date.now() - started;
+
+    if (elapsed > 45000 && elapsed < 48000) {
+      try { await chrome.tabs.reload(tabId, { bypassCache: true }); loadCompleteAt = 0; } catch {}
+    }
+
+    if (!loadCompleteAt) {
+      const t0 = Date.now();
+      while (!loadCompleteAt && Date.now() - t0 < 10000) await sleep(200);
+      if (loadCompleteAt) {
+        await sleep(2500);
+        await ensureInjectedAndPoke(tabId);
+      }
+    } else {
+      await ensureInjectedAndPoke(tabId);
+    }
+    await sleep(2500);
+  }
+
+  if (!finished) {
+    const rt = await getRuntime();
+    rt.lastCheckAt[incidentId] = Date.now();
+    rt.lastStatus[incidentId] = { ok: false, changed: false, note: "TIMEOUT" };
+    await setRuntime(rt);
+    chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(()=>{});
+    cleanup();
+  }
+  return lastResult;
+}
+
+async function ensureInjectedAndPoke(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content-script.js"] });
+  } catch {}
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "poke" }, () => {});
+  } catch {}
+}
+
+// ===== messaging =====
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  (async () => {
+    if (msg?.type === "saveSettings") {
+      const { incidentIds, intervalMinutes, bgPollingEnabled, rawIdsText } = msg.payload || {};
+      await setSettings({
+        incidentIds,
+        intervalMinutes: Math.max(1, Number(intervalMinutes) || DEFAULT_INTERVAL_MINUTES),
+        bgPollingEnabled: !!bgPollingEnabled,
+        rawIdsText: String(rawIdsText || "")
+      });
+      await rescheduleAlarm();
+      await chrome.alarms.create(IMMEDIATE_ALARM_NAME, { when: Date.now() + 5000 });
+      sendResponse({ ok: true });
+    } else if (msg?.type === "getSettings") {
+      const s = await getSettings();
+      const r = await getRuntime();
+      sendResponse({ ok: true, state: { ...s, ...r } });
+    } else if (msg?.type === "pokeAll") {
+      pollOnceAll();
+      sendResponse({ ok: true });
+    } else if (msg?.type === "snapshotFromCS") {
+      const res = await handleSnapshotFromCS(msg.payload);
+      sendResponse({ ok: true, res });
+    } else if (msg?.type === "openIncident") {
+      const { incidentId } = msg;
+      if (!incidentId) return sendResponse({ ok: false });
+      const url = `https://lynx.office.net/incident/${encodeURIComponent(incidentId)}`;
+      await chrome.tabs.create({ url });
+      sendResponse({ ok: true });
+    } else if (msg?.type === "getSnapshots") {
+      const { incidentId } = msg;
+      const rt = await getRuntime();
+      sendResponse({
+        ok: true,
+        incidentId,
+        last: rt.lastSnapshot?.[incidentId] || "",
+        prev: rt.prevSnapshot?.[incidentId] || ""
+      });
+    } else if (msg?.type === "getHtmlSnapshots") {
+      const { incidentId } = msg;
+      const rt = await getRuntime();
+      sendResponse({
+        ok: true,
+        incidentId,
+        lastHtml: rt.lastHtml?.[incidentId] || "",
+        prevHtml: rt.prevHtml?.[incidentId] || ""
+      });
+    } else if (msg?.type === "testNotify") {
+      const base = {
+        type: "basic",
+        title: "通知テスト",
+        message: "これは拡張機能の通知テストです。OS の通知センターで確認してください。",
+        priority: 1
+      };
+      const r = await createNotificationBase(base);
+      sendResponse(r);
+    } else if (msg?.type === "diagnostics") {
+      const s = await getSettings();
+      const r = await getRuntime();
+      const alarms = await chrome.alarms.getAll();
+      sendResponse({ ok: true, state: { ...s, ...r }, alarms });
+    }
+  })();
+  return true;
+});
