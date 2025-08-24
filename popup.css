@@ -70,6 +70,8 @@ textarea#ids:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix
 .btn:active { transform: translateY(1px); }
 .btn.primary { background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 80%, transparent), var(--brand-strong)); border-color: var(--brand-strong); color: white; }
 .btn.primary:hover { filter: brightness(1.05); }
+.btn.danger { background-color: var(--fail); border-color: color-mix(in srgb, var(--fail) 60%, black 40%); color: white; }
+.btn.danger:hover { filter: brightness(1.1); }
 
 .status { padding: 8px 14px; background: var(--panel); }
 #statusBox {
@@ -83,11 +85,11 @@ table.grid thead th {
   text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; background: color-mix(in srgb, var(--panel) 70%, var(--glass) 30%);
   border-bottom: 1px solid var(--border);
 }
-table.grid th:nth-child(1) { width: 16%; } /* ID */
+table.grid th:nth-child(1) { width: 15%; } /* ID */
 table.grid th:nth-child(2) { width: 24%; } /* 最終チェック */
 table.grid th:nth-child(3) { width: 15%; } /* 今回の判定 */
 /* th:nth-child(4) is 備考, auto */
-table.grid th:nth-child(5) { width: 20%; } /* 操作 */
+table.grid th:nth-child(5) { width: 22%; } /* 操作 */
 table.grid td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.grid .col-id,
 table.grid .col-check-at,

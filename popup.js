@@ -4,6 +4,7 @@ const intervalEl = document.getElementById("interval");
 const bgEnabledEl = document.getElementById("bgEnabled");
 const saveBtn = document.getElementById("saveBtn");
 const pokeBtn = document.getElementById("pokeBtn");
+const stopBtn = document.getElementById("stopBtn");
 const testNotifyBtn = document.getElementById("testNotifyBtn");
 const diagBtn = document.getElementById("diagBtn");
 const statusBox = document.getElementById("statusBox");
@@ -196,6 +197,11 @@ pokeBtn.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "pokeAll" });
 });
 
+stopBtn.addEventListener("click", async () => {
+  setStatus("⏹️ チェックの中断をリクエストしました…");
+  await chrome.runtime.sendMessage({ type: "stop" });
+});
+
 testNotifyBtn.addEventListener("click", async () => {
   let level = "(unknown)";
   try {
@@ -225,6 +231,8 @@ diagBtn.addEventListener("click", async () => {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "bgStart") {
     setStatus(`⏳ チェック開始: ${msg.ids.length} 件`);
+    pokeBtn.disabled = true;
+    stopBtn.hidden = false;
   } else if (msg?.type === "bgResult") {
     const id = msg.incidentId;
     const st = msg.result;
@@ -235,6 +243,8 @@ chrome.runtime.onMessage.addListener((msg) => {
   } else if (msg?.type === "bgDone") {
     const when = new Date(msg.at).toLocaleString();
     setStatus(`✅ チェック完了（変更: ${msg.changedCount}） @ ${when}`);
+    pokeBtn.disabled = false;
+    stopBtn.hidden = true;
   } else if (msg?.type === "bgTick") {
     const when = new Date(msg.when).toLocaleString();
     setStatus(`⏰ アラーム(${msg.name})発火 @ ${when}`);

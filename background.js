@@ -204,10 +204,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 let queueRunning = false;
+let stopFlag = false;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // 逐次：同一バッチ内で連続処理
 async function pollOnceAll() {
+  stopFlag = false; // Reset stop flag on new run
   const s = await getSettings();
   if (!s.bgPollingEnabled) return;
   const ids = (s.incidentIds || []).map(x => x.trim()).filter(Boolean);
@@ -220,6 +222,10 @@ async function pollOnceAll() {
 
   try {
     for (const id of ids) {
+      if (stopFlag) {
+        console.log(`[${new Date().toISOString()}] Stop requested, aborting poll loop.`);
+        break;
+      }
       try {
         const r = await openInactiveTabAndSnapshot(id);
         if (r?.changed) changedCount++;
@@ -236,6 +242,7 @@ async function pollOnceAll() {
     chrome.action.setBadgeText({ text: changedCount ? String(Math.min(99, changedCount)) : "" });
     chrome.runtime.sendMessage({ type: "bgDone", changedCount, at: now }).catch(()=>{});
     queueRunning = false;
+    stopFlag = false; // Reset flag here too
   }
 }
 
@@ -350,6 +357,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: true, state: { ...s, ...r } });
     } else if (msg?.type === "pokeAll") {
       pollOnceAll();
+      sendResponse({ ok: true });
+    } else if (msg?.type === "stop") {
+      stopFlag = true;
       sendResponse({ ok: true });
     } else if (msg?.type === "snapshotFromCS") {
       const res = await handleSnapshotFromCS(msg.payload);
