@@ -59,11 +59,9 @@ async function getRuntime() {
   const { runtime } = await chrome.storage.local.get("runtime");
   return { ...DEFAULT_RUNTIME, ...(runtime || {}) };
 }
-async function setRuntime(patch) {
-  const cur = await getRuntime();
-  const merged = { ...cur, ...(patch || {}) };
-  await chrome.storage.local.set({ runtime: merged });
-  return merged;
+async function setRuntime(newRuntime) {
+  await chrome.storage.local.set({ runtime: newRuntime });
+  return newRuntime;
 }
 
 async function sha256Hex(str) {
