@@ -160,42 +160,58 @@ async function notifyChange(incidentId, title, hint) {
 
 async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotHtml, contentHtml }) {
   const now = Date.now();
-  const runtime = await getRuntime();
+  const oldRuntime = await getRuntime();
   const result = { ok: false, changed: false, note: "" };
 
-  // 比較対象のHTML (contentHtml) が無い場合は NG
   if (!incidentId || !contentHtml || !contentHtml.trim()) {
-    result.ok = false; result.note = "NO_CONTENT";
-  } else {
-    // 主要コンテンツのHTMLをハッシュ化して比較
-    const safeContentHtml = sanitizeHtmlForHashing(contentHtml);
-    const hash = await sha256Hex(safeContentHtml);
-    const prevHash = runtime.lastHashes[incidentId];
-
-    // プレビュー用にフルHTMLとテキストも保持
-    const safeFullHtml = sanitizeHtml(snapshotHtml);
-    const normText = sanitizeText(snapshotText);
-
-    if (prevHash && prevHash !== hash) {
-      console.log(`[${new Date().toISOString()}] Change detected for ${incidentId}. Notifying.`);
-      runtime.prevSnapshot[incidentId] = runtime.lastSnapshot[incidentId] || "";
-      runtime.prevHtml[incidentId] = runtime.lastHtml[incidentId] || "";
-      runtime.lastChangeAt[incidentId] = now;
-      result.changed = true;
-      await notifyChange(incidentId, title || `Incident ${incidentId}`, normText.slice(0, 200));
-    }
-
-    runtime.lastHashes[incidentId]   = hash;
-    runtime.lastSnapshot[incidentId] = normText;
-    runtime.lastHtml[incidentId]     = safeFullHtml;
-
-    result.ok = true;
-    result.note = normText.slice(0, 120);
+    result.ok = false;
+    result.note = "NO_CONTENT";
+    const nextRuntime = {
+      ...oldRuntime,
+      lastCheckAt: { ...oldRuntime.lastCheckAt, [incidentId]: now },
+      lastStatus: { ...oldRuntime.lastStatus, [incidentId]: { ...result } },
+    };
+    await setRuntime(nextRuntime);
+    chrome.runtime.sendMessage({ type: "bgResult", incidentId, result }).catch(()=>{});
+    return result;
   }
-  runtime.lastCheckAt[incidentId] = now;
-  runtime.lastStatus[incidentId] = { ...result };
-  await setRuntime(runtime);
 
+  // Sanitize and hash the new content
+  const safeContentHtml = sanitizeHtmlForHashing(contentHtml);
+  const hash = await sha256Hex(safeContentHtml);
+  const prevHash = oldRuntime.lastHashes[incidentId];
+
+  // Sanitize other data for storage and preview
+  const normText = sanitizeText(snapshotText);
+  const safeFullHtml = sanitizeHtml(snapshotHtml);
+
+  const newRuntime = { ...oldRuntime };
+
+  if (prevHash && prevHash !== hash) {
+    result.changed = true;
+    console.log(`[${new Date().toISOString()}] Change detected for ${incidentId}. Notifying.`);
+
+    // Copy the last known state to the "previous" state fields
+    newRuntime.prevSnapshot = { ...oldRuntime.prevSnapshot, [incidentId]: oldRuntime.lastSnapshot?.[incidentId] || "" };
+    newRuntime.prevHtml = { ...oldRuntime.prevHtml, [incidentId]: oldRuntime.lastHtml?.[incidentId] || "" };
+    newRuntime.lastChangeAt = { ...oldRuntime.lastChangeAt, [incidentId]: now };
+
+    await notifyChange(incidentId, title || `Incident ${incidentId}`, normText.slice(0, 200));
+  }
+
+  // Always update the "last" state fields with the current data
+  newRuntime.lastHashes = { ...oldRuntime.lastHashes, [incidentId]: hash };
+  newRuntime.lastSnapshot = { ...oldRuntime.lastSnapshot, [incidentId]: normText };
+  newRuntime.lastHtml = { ...oldRuntime.lastHtml, [incidentId]: safeFullHtml };
+
+  result.ok = true;
+  result.note = normText.slice(0, 120);
+
+  // Update check time and status
+  newRuntime.lastCheckAt = { ...oldRuntime.lastCheckAt, [incidentId]: now };
+  newRuntime.lastStatus = { ...oldRuntime.lastStatus, [incidentId]: { ...result } };
+
+  await setRuntime(newRuntime);
   chrome.runtime.sendMessage({ type: "bgResult", incidentId, result }).catch(()=>{});
   return result;
 }
