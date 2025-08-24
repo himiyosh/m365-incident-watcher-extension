@@ -79,6 +79,43 @@ function sanitizeText(t) {
     .trim();
 }
 
+// ハッシュ化のための、より積極的なサニタイズ
+function sanitizeHtmlForHashing(html) {
+  try {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+
+    // Remove comments first
+    doc.querySelectorAll('*').forEach(el => {
+        [...el.childNodes].filter(node => node.nodeType === 8)
+          .forEach(comment => el.removeChild(comment));
+    });
+
+    doc.querySelectorAll("*").forEach(el => {
+      // Remove attributes that are likely to be dynamic or irrelevant to content change
+      el.removeAttribute("id");
+      el.removeAttribute("style");
+
+      const attrsToRemove = [];
+      for (const attr of el.attributes) {
+        if (attr.name.startsWith("data-")) {
+            attrsToRemove.push(attr.name);
+        }
+      }
+      attrsToRemove.forEach(attrName => el.removeAttribute(attrName));
+
+      // Normalize class attributes by sorting them
+      if (el.hasAttribute("class")) {
+        const classes = el.getAttribute("class").split(/\s+/).filter(Boolean).sort().join(" ");
+        el.setAttribute("class", classes);
+      }
+    });
+    return doc.body.innerHTML;
+  } catch (e) {
+    console.error("Error in sanitizeHtmlForHashing:", e);
+    return String(html || "");
+  }
+}
+
 // シンプルサニタイズ（script/iframe/イベント属性除去）
 function sanitizeHtml(html) {
   try {
@@ -131,7 +168,7 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotH
     result.ok = false; result.note = "NO_CONTENT";
   } else {
     // 主要コンテンツのHTMLをハッシュ化して比較
-    const safeContentHtml = sanitizeHtml(contentHtml);
+    const safeContentHtml = sanitizeHtmlForHashing(contentHtml);
     const hash = await sha256Hex(safeContentHtml);
     const prevHash = runtime.lastHashes[incidentId];
 
