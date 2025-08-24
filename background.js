@@ -73,7 +73,7 @@ async function sha256Hex(str) {
 
 function sanitizeText(t) {
   return (t || "")
-    .replace(/\s+/g, " ")
+    .replace(/[ \t]+/g, " ") // Keep newlines for diff view
     .replace(/request[-_ ]?id[:=]?\s*[a-f0-9-]+/ig, "")
     .replace(/updated[:=]?\s*\d{4}-\d{2}-\d{2}[ t]\d{2}:\d{2}:\d{2}(?:\.\d+)?z?/ig, "")
     .trim();
@@ -121,23 +121,26 @@ async function notifyChange(incidentId, title, hint) {
   return res;
 }
 
-async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotHtml }) {
+async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotHtml, contentHtml }) {
   const now = Date.now();
   const runtime = await getRuntime();
   const result = { ok: false, changed: false, note: "" };
 
-  // HTML が無い場合は NG
-  if (!incidentId || !snapshotHtml || !snapshotHtml.trim()) {
-    result.ok = false; result.note = "NO_SNAPSHOT";
+  // 比較対象のHTML (contentHtml) が無い場合は NG
+  if (!incidentId || !contentHtml || !contentHtml.trim()) {
+    result.ok = false; result.note = "NO_CONTENT";
   } else {
-    // HTML をハッシュ化して比較
-    const safeHtml = sanitizeHtml(snapshotHtml);
-    const hash = await sha256Hex(safeHtml);
+    // 主要コンテンツのHTMLをハッシュ化して比較
+    const safeContentHtml = sanitizeHtml(contentHtml);
+    const hash = await sha256Hex(safeContentHtml);
     const prevHash = runtime.lastHashes[incidentId];
-    // テキストは別途プレビュー用に保持
+
+    // プレビュー用にフルHTMLとテキストも保持
+    const safeFullHtml = sanitizeHtml(snapshotHtml);
     const normText = sanitizeText(snapshotText);
 
     if (prevHash && prevHash !== hash) {
+      console.log(`[${new Date().toISOString()}] Change detected for ${incidentId}. Notifying.`);
       runtime.prevSnapshot[incidentId] = runtime.lastSnapshot[incidentId] || "";
       runtime.prevHtml[incidentId] = runtime.lastHtml[incidentId] || "";
       runtime.lastChangeAt[incidentId] = now;
@@ -147,7 +150,7 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotH
 
     runtime.lastHashes[incidentId]   = hash;
     runtime.lastSnapshot[incidentId] = normText;
-    runtime.lastHtml[incidentId]     = safeHtml;
+    runtime.lastHtml[incidentId]     = safeFullHtml;
 
     result.ok = true;
     result.note = normText.slice(0, 120);

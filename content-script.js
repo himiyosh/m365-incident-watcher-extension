@@ -10,15 +10,11 @@
   }
 
   function captureSnapshots() {
-    // テキスト（検知用）
-    const text = document.body
-      ? (document.body.innerText || "")
-      : (document.documentElement.innerText || "");
-    // HTML（プレビュー用）
-    const html = document.documentElement
-      ? document.documentElement.outerHTML
-      : "<html></html>";
-    return { text, html, title: document.title || "" };
+    const html = document.documentElement ? document.documentElement.outerHTML : "<html></html>";
+    const text = document.body ? (document.body.innerText || "") : "";
+    const mainContent = document.querySelector("main, [role='main']");
+    const contentHtml = mainContent ? mainContent.innerHTML : (document.body?.innerHTML || "");
+    return { text, html, contentHtml, title: document.title || "" };
   }
 
   function isContentReady() {
@@ -66,7 +62,7 @@
 
   async function sendSnapshot(kind = "auto") {
     const incidentId = getIncidentIdFromUrl();
-    const { text, html, title } = captureSnapshots();
+    const { text, html, contentHtml, title } = captureSnapshots();
     chrome.runtime.sendMessage({
       type: "snapshotFromCS",
       payload: {
@@ -74,6 +70,7 @@
         title,
         snapshotText: text,
         snapshotHtml: html,
+        contentHtml: contentHtml,
         by: kind
       }
     }, () => {});
