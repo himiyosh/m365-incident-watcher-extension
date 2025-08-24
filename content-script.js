@@ -21,64 +21,47 @@
     return { text, html, title: document.title || "" };
   }
 
-  function hasMeaningfulDom() {
-    const root = document.getElementById("root");
-    if (!root || root.children.length === 0) return false;
-
-    // ローディングスピナーだけの場合はまだ待つ
-    if (root.children.length === 1) {
-      const child = root.children[0];
-      if (child.getAttribute('role') === 'progressbar' || /spinner/i.test(child.className)) {
-        return false;
-      }
+  function isContentReady() {
+    const innerText = document.body?.innerText || '';
+    // "Loading..." が含まれている間は待機
+    if (/(^|\s)Loading\.\.\.($|\s)/i.test(innerText)) {
+      return false;
     }
-
-    // 主要なコンテナや、代表的な要素、テキスト量などで判断
-    const main = document.querySelector("main, [role='main']");
-    const header = document.querySelector("h1, h2, [data-automation-id='header']");
-    const cards = document.querySelector(".ms-Stack, .ms-Card, [class*='card']");
-    const txtLen = (document.body?.innerText || "").trim().length;
-
-    return (
-      (main && main.children.length > 0) ||
-      (header && header.innerText.trim() !== "") ||
-      cards ||
-      (txtLen >= 100)
-    );
+    // 主要なヘッダー（h1, h2）に意味のあるテキストがあるか
+    const header = document.querySelector("h1, h2");
+    if (header && header.innerText.trim().length > 5) {
+      return true;
+    }
+    // 全体のテキスト量が一定以上あるか（フォールバック）
+    if (innerText.trim().length > 150) {
+      return true;
+    }
+    return false;
   }
 
-  async function waitForMeaningfulContent({ timeoutMs = 45000, quietMs = 800 } = {}) {
-    const start = performance.now();
-    if (hasMeaningfulDom()) {
-      // 直後のちらつきを抑えるため少し静穏待ち
+  async function waitForMeaningfulContent({ timeoutMs = 45000, quietMs = 1000 } = {}) {
+    if (isContentReady()) {
       await sleep(quietMs);
       return true;
     }
-
-    // 変化を監視
-    let resolved = false;
-    const ready = new Promise((resolve) => {
+    return new Promise((resolve) => {
+      let timeoutId = null;
       const mo = new MutationObserver(() => {
-        if (hasMeaningfulDom()) {
+        if (isContentReady()) {
           mo.disconnect();
-          resolved = true;
-          // 直後の追加レンダリングを待つ
+          clearTimeout(timeoutId);
+          // 最終レンダリングの揺らぎを吸収
           sleep(quietMs).then(() => resolve(true));
         }
       });
       mo.observe(document.documentElement || document.body, {
-        childList: true, subtree: true, attributes: false, characterData: false
+        childList: true, subtree: true, characterData: true
       });
-      // 最終タイムアウト
-      setTimeout(() => {
-        if (!resolved) {
-          mo.disconnect();
-          resolve(false);
-        }
+      timeoutId = setTimeout(() => {
+        mo.disconnect();
+        resolve(isContentReady());
       }, timeoutMs);
     });
-
-    return ready;
   }
 
   async function sendSnapshot(kind = "auto") {
