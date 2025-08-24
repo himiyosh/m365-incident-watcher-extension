@@ -79,43 +79,6 @@ function sanitizeText(t) {
     .trim();
 }
 
-// ハッシュ化のための、より積極的なサニタイズ
-function sanitizeHtmlForHashing(html) {
-  try {
-    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
-
-    // Remove comments first
-    doc.querySelectorAll('*').forEach(el => {
-        [...el.childNodes].filter(node => node.nodeType === 8)
-          .forEach(comment => el.removeChild(comment));
-    });
-
-    doc.querySelectorAll("*").forEach(el => {
-      // Remove attributes that are likely to be dynamic or irrelevant to content change
-      el.removeAttribute("id");
-      el.removeAttribute("style");
-
-      const attrsToRemove = [];
-      for (const attr of el.attributes) {
-        if (attr.name.startsWith("data-")) {
-            attrsToRemove.push(attr.name);
-        }
-      }
-      attrsToRemove.forEach(attrName => el.removeAttribute(attrName));
-
-      // Normalize class attributes by sorting them
-      if (el.hasAttribute("class")) {
-        const classes = el.getAttribute("class").split(/\s+/).filter(Boolean).sort().join(" ");
-        el.setAttribute("class", classes);
-      }
-    });
-    return doc.body.innerHTML;
-  } catch (e) {
-    console.error("Error in sanitizeHtmlForHashing:", e);
-    return String(html || "");
-  }
-}
-
 // シンプルサニタイズ（script/iframe/イベント属性除去）
 function sanitizeHtml(html) {
   try {
@@ -158,12 +121,13 @@ async function notifyChange(incidentId, title, hint) {
   return res;
 }
 
-async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotHtml, contentHtml }) {
+async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotHtml }) {
   const now = Date.now();
   const oldRuntime = await getRuntime();
   const result = { ok: false, changed: false, note: "" };
 
-  if (!incidentId || !contentHtml || !contentHtml.trim()) {
+  const normText = sanitizeText(snapshotText);
+  if (!incidentId || !normText) {
     result.ok = false;
     result.note = "NO_CONTENT";
     const nextRuntime = {
@@ -176,15 +140,12 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotH
     return result;
   }
 
-  // Sanitize and hash the new content
-  const safeContentHtml = sanitizeHtmlForHashing(contentHtml);
-  const hash = await sha256Hex(safeContentHtml);
+  // Sanitize and hash the new TEXT content
+  const hash = await sha256Hex(normText);
   const prevHash = oldRuntime.lastHashes[incidentId];
 
-  // Sanitize other data for storage and preview
-  const normText = sanitizeText(snapshotText);
+  // Sanitize HTML for preview
   const safeFullHtml = sanitizeHtml(snapshotHtml);
-
   const newRuntime = { ...oldRuntime };
 
   if (prevHash && prevHash !== hash) {
