@@ -67,11 +67,11 @@ function renderTable(state) {
     const note = st?.note ? String(st.note) : "";
 
     row.innerHTML = `
-      <td class="mono">${id}</td>
-      <td>${fmt(checkAt)}</td>
-      <td class="${className}">${icon} ${statusTxt}</td>
-      <td class="mono">${esc(note).slice(0, 80)}</td>
-      <td>
+      <td class="mono col-id">${id}</td>
+      <td class="col-check-at">${fmt(checkAt)}</td>
+      <td class="${className} col-status">${icon} ${statusTxt}</td>
+      <td class="mono col-note">${esc(note).slice(0, 80)}</td>
+      <td class="col-actions">
         <button data-open="${id}">開く</button>
         <button data-prev="${id}">プレビュー</button>
       </td>

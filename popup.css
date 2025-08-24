@@ -30,7 +30,7 @@
 
 * { box-sizing: border-box; }
 html, body {
-  margin: 0; padding: 0; width: 460px; min-height: 560px;
+  margin: 0; padding: 0; width: 580px; min-height: 560px;
   background: radial-gradient(1200px 600px at 50% -10%, rgba(59,130,246,.18), transparent 60%), var(--bg);
   color: var(--fg);
   font: 13px/1.55 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
@@ -84,6 +84,16 @@ table.grid thead th {
   border-bottom: 1px solid var(--border);
 }
 table.grid td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.grid .col-id,
+table.grid .col-check-at,
+table.grid .col-status,
+table.grid .col-actions {
+  white-space: nowrap;
+}
+table.grid .col-note {
+  word-break: break-all;
+}
+
 .ok { color: var(--ok); font-weight: 600; }
 .fail { color: var(--fail); font-weight: 600; }
 .muted { color: var(--muted); }
