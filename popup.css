@@ -80,16 +80,11 @@ textarea#ids:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix
 }
 
 .results { padding: 6px 14px 14px; background: var(--panel); }
-table.grid { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 12px; overflow: hidden; table-layout: fixed; }
+table.grid { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 12px; overflow: hidden; }
 table.grid thead th {
   text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; background: color-mix(in srgb, var(--panel) 70%, var(--glass) 30%);
   border-bottom: 1px solid var(--border);
 }
-table.grid th:nth-child(1) { width: 15%; } /* ID */
-table.grid th:nth-child(2) { width: 24%; } /* 最終チェック */
-table.grid th:nth-child(3) { width: 15%; } /* 今回の判定 */
-/* th:nth-child(4) is 備考, auto */
-table.grid th:nth-child(5) { width: 22%; } /* 操作 */
 table.grid td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.grid .col-id,
 table.grid .col-check-at,
@@ -99,6 +94,7 @@ table.grid .col-actions {
 }
 table.grid .col-note {
   word-break: break-all;
+  min-width: 140px;
 }
 
 .ok { color: var(--ok); font-weight: 600; }

@@ -235,14 +235,18 @@ async function pollOnceAll() {
       await sleep(150);
     }
   } finally {
-    const now = Date.now();
-    const rt = await getRuntime();
-    rt.lastRunAt = now;
-    await setRuntime(rt);
-    chrome.action.setBadgeText({ text: changedCount ? String(Math.min(99, changedCount)) : "" });
-    chrome.runtime.sendMessage({ type: "bgDone", changedCount, at: now }).catch(()=>{});
-    queueRunning = false;
-    stopFlag = false; // Reset flag here too
+    try {
+      const now = Date.now();
+      const rt = await getRuntime();
+      rt.lastRunAt = now;
+      await setRuntime(rt);
+      chrome.action.setBadgeText({ text: changedCount ? String(Math.min(99, changedCount)) : "" });
+      chrome.runtime.sendMessage({ type: "bgDone", changedCount, at: now }).catch(()=>{});
+    } finally {
+      // This must always run to prevent the queue from getting stuck.
+      queueRunning = false;
+      stopFlag = false;
+    }
   }
 }
 
