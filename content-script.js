@@ -12,7 +12,9 @@
   function captureSnapshots() {
     const html = document.documentElement ? document.documentElement.outerHTML : "<html></html>";
     const text = document.body ? (document.body.innerText || "") : "";
-    return { text, html, title: document.title || "" };
+    const mainContent = document.querySelector("main, [role='main']");
+    const contentText = mainContent ? mainContent.innerText : text;
+    return { text, html, contentText, title: document.title || "" };
   }
 
   function isContentReady() {
@@ -60,13 +62,14 @@
 
   async function sendSnapshot(kind = "auto") {
     const incidentId = getIncidentIdFromUrl();
-    const { text, html, title } = captureSnapshots();
+    const { text, html, contentText, title } = captureSnapshots();
     chrome.runtime.sendMessage({
       type: "snapshotFromCS",
       payload: {
         incidentId,
         title,
         snapshotText: text,
+        contentText: contentText,
         snapshotHtml: html,
         by: kind
       }

@@ -121,13 +121,16 @@ async function notifyChange(incidentId, title, hint) {
   return res;
 }
 
-async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotHtml }) {
+async function handleSnapshotFromCS({ incidentId, title, snapshotText, contentText, snapshotHtml }) {
   const now = Date.now();
   const oldRuntime = await getRuntime();
   const result = { ok: false, changed: false, note: "" };
 
-  const normText = sanitizeText(snapshotText);
-  if (!incidentId || !normText) {
+  // Use contentText for comparison, but full snapshotText for notes/previews
+  const textToHash = sanitizeText(contentText);
+  const fullNormText = sanitizeText(snapshotText);
+
+  if (!incidentId || !textToHash) {
     result.ok = false;
     result.note = "NO_CONTENT";
     const nextRuntime = {
@@ -141,7 +144,7 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotH
   }
 
   // Sanitize and hash the new TEXT content
-  const hash = await sha256Hex(normText);
+  const hash = await sha256Hex(textToHash);
   const prevHash = oldRuntime.lastHashes[incidentId];
 
   // Sanitize HTML for preview
@@ -157,16 +160,16 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotH
     newRuntime.prevHtml = { ...oldRuntime.prevHtml, [incidentId]: oldRuntime.lastHtml?.[incidentId] || "" };
     newRuntime.lastChangeAt = { ...oldRuntime.lastChangeAt, [incidentId]: now };
 
-    await notifyChange(incidentId, title || `Incident ${incidentId}`, normText.slice(0, 200));
+    await notifyChange(incidentId, title || `Incident ${incidentId}`, fullNormText.slice(0, 200));
   }
 
   // Always update the "last" state fields with the current data
   newRuntime.lastHashes = { ...oldRuntime.lastHashes, [incidentId]: hash };
-  newRuntime.lastSnapshot = { ...oldRuntime.lastSnapshot, [incidentId]: normText };
+  newRuntime.lastSnapshot = { ...oldRuntime.lastSnapshot, [incidentId]: fullNormText };
   newRuntime.lastHtml = { ...oldRuntime.lastHtml, [incidentId]: safeFullHtml };
 
   result.ok = true;
-  result.note = normText.slice(0, 120);
+  result.note = fullNormText.slice(0, 120);
 
   // Update check time and status
   newRuntime.lastCheckAt = { ...oldRuntime.lastCheckAt, [incidentId]: now };
@@ -217,8 +220,12 @@ async function pollOnceAll() {
 
   try {
     for (const id of ids) {
-      const r = await openInactiveTabAndSnapshot(id);
-      if (r?.changed) changedCount++;
+      try {
+        const r = await openInactiveTabAndSnapshot(id);
+        if (r?.changed) changedCount++;
+      } catch (e) {
+        console.error(`[${new Date().toISOString()}] Error processing ID ${id}, continuing poll.`, e);
+      }
       await sleep(150);
     }
   } finally {
