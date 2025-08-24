@@ -225,7 +225,12 @@ async function pollOnceAll() {
   if (!ids.length) return;
   if (queueRunning) return;
   queueRunning = true;
-  setRuntime({ ...s, isChecking: true });
+
+  // Update isChecking flag without overwriting the whole runtime
+  (async () => {
+    const rt = await getRuntime();
+    await setRuntime({ ...rt, isChecking: true });
+  })();
 
   addLog(`⏳ チェック開始: ${ids.length} 件`);
   let changedCount = 0;

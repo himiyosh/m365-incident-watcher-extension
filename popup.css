@@ -93,8 +93,7 @@ table.grid th:nth-child(5) { width: 120px; }
 table.grid td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.grid .col-id,
 table.grid .col-check-at,
-table.grid .col-status,
-table.grid .col-actions {
+table.grid .col-status {
   white-space: nowrap;
 }
 table.grid .col-note {
