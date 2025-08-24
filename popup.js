@@ -12,7 +12,7 @@ const resultBody = document.getElementById("resultBody");
 // preview modal
 const modal = document.getElementById("previewModal");
 const pvTitle = document.getElementById("pvTitle");
-const pvPre = document.getElementById("pvPre");
+const pvText = document.getElementById("pvText");
 const pvClose = document.getElementById("pvClose");
 const tabLatest = document.getElementById("tabLatest");
 const tabPrev = document.getElementById("tabPrev");
@@ -96,18 +96,18 @@ function renderTable(state) {
     btn.addEventListener("click", async () => {
       const incidentId = btn.getAttribute("data-prev");
       pvTitle.textContent = `プレビュー: ${incidentId}`;
-      pvPre.innerHTML = "読み込み中…";
+      pvText.innerHTML = "読み込み中…";
       modal.style.display = "block";
       const r = await chrome.runtime.sendMessage({ type: "getSnapshots", incidentId }).catch(()=>null);
       const last = r?.last || "";
       const prev = r?.prev || "";
 
       // 既定は最新
-      pvPre.textContent = last || "(スナップショット無し)";
+      pvText.textContent = last || "(スナップショット無し)";
 
-      tabLatest.onclick = () => { pvPre.textContent = last || "(スナップショット無し)"; };
-      tabPrev.onclick   = () => { pvPre.textContent = prev || "(前回スナップショット無し)"; };
-      tabDiff.onclick   = () => { pvPre.innerHTML = diffLines(prev, last); };
+      tabLatest.onclick = () => { pvText.textContent = last || "(スナップショット無し)"; };
+      tabPrev.onclick   = () => { pvText.textContent = prev || "(前回スナップショット無し)"; };
+      tabDiff.onclick   = () => { pvText.innerHTML = diffLines(prev, last); };
     });
   });
 }

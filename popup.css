@@ -57,7 +57,7 @@ textarea#ids {
 }
 textarea#ids:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 24%, transparent); }
 
-.toolbar { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 .toolbar .num { width: 80px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--fg); }
 .toolbar .spacer { flex: 1; }
 
