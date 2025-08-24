@@ -126,14 +126,16 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotH
   const runtime = await getRuntime();
   const result = { ok: false, changed: false, note: "" };
 
-  // 空テキストは NO_SNAPSHOT
-  if (!incidentId || !snapshotText || !snapshotText.trim()) {
+  // HTML が無い場合は NG
+  if (!incidentId || !snapshotHtml || !snapshotHtml.trim()) {
     result.ok = false; result.note = "NO_SNAPSHOT";
   } else {
-    const normText = sanitizeText(snapshotText);
-    const hash = await sha256Hex(normText);
+    // HTML をハッシュ化して比較
+    const safeHtml = sanitizeHtml(snapshotHtml);
+    const hash = await sha256Hex(safeHtml);
     const prevHash = runtime.lastHashes[incidentId];
-    const safeHtml = sanitizeHtml(snapshotHtml || "");
+    // テキストは別途プレビュー用に保持
+    const normText = sanitizeText(snapshotText);
 
     if (prevHash && prevHash !== hash) {
       runtime.prevSnapshot[incidentId] = runtime.lastSnapshot[incidentId] || "";
@@ -221,87 +223,69 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   }
 });
 
+// イベント駆動でスナップショットを取得
 async function openInactiveTabAndSnapshot(incidentId) {
   const url = `https://lynx.office.net/incident/${encodeURIComponent(incidentId)}`;
-  const wins = await chrome.windows.getAll({ populate: false, windowTypes: ["normal"] });
-  let targetWindowId = wins.length ? wins[0].id : (await chrome.windows.create({ focused: false })).id;
+  let tabId = null;
 
-  const tab = await chrome.tabs.create({ url, active: false, windowId: targetWindowId });
-  const tabId = tab.id;
-  let finished = false;
-  let lastResult = null;
-  let loadCompleteAt = 0;
+  return new Promise(async (resolve) => {
+    const timeout = setTimeout(() => {
+      cleanupAndFail("TIMEOUT");
+    }, 90000); // 90秒でタイムアウト
 
-  const onUpdated = (tid, info) => {
-    if (tid === tabId) {
-      if (info.status === "complete") loadCompleteAt = Date.now();
-    }
-  };
-  const onSnapshot = async (msg, sender) => {
-    if (msg?.type === "snapshotFromCS" && sender.tab && sender.tab.id === tabId && msg.payload?.incidentId === incidentId) {
-      lastResult = await handleSnapshotFromCS(msg.payload);
-      finished = true;
-      cleanup();
-    }
-  };
-  function cleanup() {
-    chrome.tabs.onUpdated.removeListener(onUpdated);
-    chrome.runtime.onMessage.removeListener(onSnapshot);
-    chrome.tabs.remove(tabId, () => {});
-  }
-
-  chrome.tabs.onUpdated.addListener(onUpdated);
-  chrome.runtime.onMessage.addListener(onSnapshot);
-
-  const started = Date.now();
-  // 1) 初回ロード完了を最大 30s 待つ
-  while (!loadCompleteAt && Date.now() - started < 30000) await sleep(200);
-
-  // 2) 完了後も SPA の初期描画を 5s ほど猶予
-  if (loadCompleteAt) {
-    await sleep(5000);
-    await ensureInjectedAndPoke(tabId);
-  }
-
-  // 3) 最大 90s 粘る（45s でハードリロード→再注入）
-  while (!finished && Date.now() - started < 90000) {
-    const elapsed = Date.now() - started;
-
-    if (elapsed > 45000 && elapsed < 48000) {
-      try { await chrome.tabs.reload(tabId, { bypassCache: true }); loadCompleteAt = 0; } catch {}
-    }
-
-    if (!loadCompleteAt) {
-      const t0 = Date.now();
-      while (!loadCompleteAt && Date.now() - t0 < 10000) await sleep(200);
-      if (loadCompleteAt) {
-        await sleep(2500);
-        await ensureInjectedAndPoke(tabId);
+    const onSnapshot = async (msg, sender) => {
+      if (msg?.type === "snapshotFromCS" && sender.tab?.id === tabId && msg.payload?.incidentId === incidentId) {
+        const result = await handleSnapshotFromCS(msg.payload);
+        cleanup();
+        resolve(result);
       }
-    } else {
-      await ensureInjectedAndPoke(tabId);
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      chrome.runtime.onMessage.removeListener(onSnapshot);
+      if (tabId) {
+        chrome.tabs.remove(tabId).catch(() => {});
+        tabId = null;
+      }
+    };
+
+    const cleanupAndFail = async (note) => {
+      const rt = await getRuntime();
+      rt.lastCheckAt[incidentId] = Date.now();
+      rt.lastStatus[incidentId] = { ok: false, changed: false, note };
+      await setRuntime(rt);
+      chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(() => {});
+      cleanup();
+      resolve(rt.lastStatus[incidentId]);
+    };
+
+    try {
+      chrome.runtime.onMessage.addListener(onSnapshot);
+      const wins = await chrome.windows.getAll({ populate: false, windowTypes: ["normal"] });
+      const targetWindowId = wins.length > 0 ? wins[0].id : (await chrome.windows.create({ focused: false })).id;
+      const tab = await chrome.tabs.create({ url, active: false, windowId: targetWindowId });
+      tabId = tab.id;
+
+      // タブのロード完了を待ってから注入
+      await new Promise(res => {
+        const listener = (tid, info) => {
+          if (tid === tabId && info.status === "complete") {
+            chrome.tabs.onUpdated.removeListener(listener);
+            res();
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+      });
+
+      await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        files: ["content-script.js"],
+      });
+    } catch (e) {
+      cleanupAndFail(`ERROR: ${e?.message || e}`);
     }
-    await sleep(2500);
-  }
-
-  if (!finished) {
-    const rt = await getRuntime();
-    rt.lastCheckAt[incidentId] = Date.now();
-    rt.lastStatus[incidentId] = { ok: false, changed: false, note: "TIMEOUT" };
-    await setRuntime(rt);
-    chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(()=>{});
-    cleanup();
-  }
-  return lastResult;
-}
-
-async function ensureInjectedAndPoke(tabId) {
-  try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["content-script.js"] });
-  } catch {}
-  try {
-    await chrome.tabs.sendMessage(tabId, { type: "poke" }, () => {});
-  } catch {}
+  });
 }
 
 // ===== messaging =====

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "M365 Incident Watcher (v1.5.0)",
-  "version": "1.5.0",
+  "name": "M365 Incident Watcher (v1.6.0)",
+  "version": "1.6.0",
   "description": "lynx.office.net のインシデント更新を検知して通知します。",
   "permissions": ["storage", "alarms", "notifications", "tabs", "scripting", "webNavigation"],
   "host_permissions": ["https://lynx.office.net/*"],
@@ -13,13 +13,6 @@
     "48":  "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "content_scripts": [
-    {
-      "matches": ["https://lynx.office.net/incident/*"],
-      "js": ["content-script.js"],
-      "run_at": "document_idle"
-    }
-  ],
   "web_accessible_resources": [
     {
       "resources": [

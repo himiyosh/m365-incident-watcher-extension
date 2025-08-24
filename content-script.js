@@ -22,19 +22,28 @@
   }
 
   function hasMeaningfulDom() {
-    // 主要レンダーコンテナ
-    const root = document.getElementById("root") || document.querySelector("#root");
+    const root = document.getElementById("root");
+    if (!root || root.children.length === 0) return false;
+
+    // ローディングスピナーだけの場合はまだ待つ
+    if (root.children.length === 1) {
+      const child = root.children[0];
+      if (child.getAttribute('role') === 'progressbar' || /spinner/i.test(child.className)) {
+        return false;
+      }
+    }
+
+    // 主要なコンテナや、代表的な要素、テキスト量などで判断
     const main = document.querySelector("main, [role='main']");
-    // 代表的に現れやすい要素（Fluent UI / 見出し）
     const header = document.querySelector("h1, h2, [data-automation-id='header']");
     const cards = document.querySelector(".ms-Stack, .ms-Card, [class*='card']");
     const txtLen = (document.body?.innerText || "").trim().length;
 
-    // どれかが成立すれば「意味のある描画」とみなす
     return (
-      (root && root.children.length > 0) ||
       (main && main.children.length > 0) ||
-      header || cards || (txtLen >= 200)
+      (header && header.innerText.trim() !== "") ||
+      cards ||
+      (txtLen >= 100)
     );
   }
 
