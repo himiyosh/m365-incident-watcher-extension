@@ -13,10 +13,13 @@ const resultBody = document.getElementById("resultBody");
 const modal = document.getElementById("previewModal");
 const pvTitle = document.getElementById("pvTitle");
 const pvText = document.getElementById("pvText");
+const pvHtml = document.getElementById("pvHtml");
 const pvClose = document.getElementById("pvClose");
-const tabLatest = document.getElementById("tabLatest");
-const tabPrev = document.getElementById("tabPrev");
-const tabDiff = document.getElementById("tabDiff");
+const tabTextLatest = document.getElementById("tabTextLatest");
+const tabTextPrev = document.getElementById("tabTextPrev");
+const tabTextDiff = document.getElementById("tabTextDiff");
+const tabHtmlLatest = document.getElementById("tabHtmlLatest");
+const tabHtmlPrev = document.getElementById("tabHtmlPrev");
 
 function parseIds(text) {
   return text
@@ -97,17 +100,63 @@ function renderTable(state) {
       const incidentId = btn.getAttribute("data-prev");
       pvTitle.textContent = `プレビュー: ${incidentId}`;
       pvText.innerHTML = "読み込み中…";
+      pvHtml.style.display = "none";
+      pvText.style.display = "block";
       modal.style.display = "block";
-      const r = await chrome.runtime.sendMessage({ type: "getSnapshots", incidentId }).catch(()=>null);
-      const last = r?.last || "";
-      const prev = r?.prev || "";
 
-      // 既定は最新
-      pvText.textContent = last || "(スナップショット無し)";
+      const [textR, htmlR] = await Promise.all([
+        chrome.runtime.sendMessage({ type: "getSnapshots", incidentId }),
+        chrome.runtime.sendMessage({ type: "getHtmlSnapshots", incidentId })
+      ]);
 
-      tabLatest.onclick = () => { pvText.textContent = last || "(スナップショット無し)"; };
-      tabPrev.onclick   = () => { pvText.textContent = prev || "(前回スナップショット無し)"; };
-      tabDiff.onclick   = () => { pvText.innerHTML = diffLines(prev, last); };
+      const lastText = textR?.last || "";
+      const prevText = textR?.prev || "";
+      const lastHtml = htmlR?.lastHtml || "";
+      const prevHtml = htmlR?.prevHtml || "";
+
+      const allTabs = [tabTextLatest, tabTextPrev, tabTextDiff, tabHtmlLatest, tabHtmlPrev];
+      const setActiveTab = (activeTab) => {
+        allTabs.forEach(tab => {
+          tab.classList.toggle("active", tab === activeTab);
+        });
+      };
+
+      const showView = (mode) => {
+        pvText.style.display = mode === "text" ? "block" : "none";
+        pvHtml.style.display = mode === "html" ? "block" : "none";
+      };
+
+      // --- Text Tabs ---
+      tabTextLatest.onclick = () => {
+        showView("text");
+        pvText.textContent = lastText || "(スナップショット無し)";
+        setActiveTab(tabTextLatest);
+      };
+      tabTextPrev.onclick = () => {
+        showView("text");
+        pvText.textContent = prevText || "(前回スナップショット無し)";
+        setActiveTab(tabTextPrev);
+      };
+      tabTextDiff.onclick = () => {
+        showView("text");
+        pvText.innerHTML = diffLines(prevText, lastText);
+        setActiveTab(tabTextDiff);
+      };
+
+      // --- HTML Tabs ---
+      tabHtmlLatest.onclick = () => {
+        showView("html");
+        pvHtml.srcdoc = lastHtml || "<html><body>(スナップショット無し)</body></html>";
+        setActiveTab(tabHtmlLatest);
+      };
+      tabHtmlPrev.onclick = () => {
+        showView("html");
+        pvHtml.srcdoc = prevHtml || "<html><body>(前回スナップショット無し)</body></html>";
+        setActiveTab(tabHtmlPrev);
+      };
+
+      // Initial state
+      tabTextLatest.onclick();
     });
   });
 }
