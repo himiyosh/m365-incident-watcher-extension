@@ -17,7 +17,9 @@ const DEFAULT_RUNTIME = {
   prevHtml: {},       // html (sanitized)
   lastCheckAt: {},
   lastStatus: {},
-  lastRunAt: null
+  lastRunAt: null,
+  logs: [],
+  isChecking: false
 };
 
 const ALARM_NAME = "incident-bg-poll";
@@ -62,6 +64,13 @@ async function getRuntime() {
 async function setRuntime(newRuntime) {
   await chrome.storage.local.set({ runtime: newRuntime });
   return newRuntime;
+}
+
+const MAX_LOGS = 100;
+async function addLog(message) {
+  const runtime = await getRuntime();
+  const newLogs = [{ ts: Date.now(), msg: message }, ...runtime.logs].slice(0, MAX_LOGS);
+  await setRuntime({ ...runtime, logs: newLogs });
 }
 
 async function sha256Hex(str) {
@@ -174,7 +183,9 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, contentTe
   newRuntime.lastStatus = { ...oldRuntime.lastStatus, [incidentId]: { ...result } };
 
   await setRuntime(newRuntime);
-  chrome.runtime.sendMessage({ type: "bgResult", incidentId, result }).catch(()=>{});
+  const icon = result.ok ? (result.changed ? "🟢" : "⚪") : "❌";
+  const statusTxt = result.ok ? (result.changed ? "変更あり" : "変更なし") : "失敗";
+  addLog(`${icon} ${incidentId}: ${statusTxt} ${result.note ? "｜ " + String(result.note).slice(0,60) : ""}`);
   return result;
 }
 
@@ -214,14 +225,15 @@ async function pollOnceAll() {
   if (!ids.length) return;
   if (queueRunning) return;
   queueRunning = true;
+  setRuntime({ ...s, isChecking: true });
 
-  chrome.runtime.sendMessage({ type: "bgStart", ids }).catch(()=>{});
+  addLog(`⏳ チェック開始: ${ids.length} 件`);
   let changedCount = 0;
 
   try {
     for (const id of ids) {
       if (stopFlag) {
-        console.log(`[${new Date().toISOString()}] Stop requested, aborting poll loop.`);
+        addLog(`⏹️ ユーザーリクエストによりチェックを中断しました。`);
         break;
       }
       try {
@@ -229,6 +241,7 @@ async function pollOnceAll() {
         if (r?.changed) changedCount++;
       } catch (e) {
         console.error(`[${new Date().toISOString()}] Error processing ID ${id}, continuing poll.`, e);
+        addLog(`❌ ID ${id} の処理中にエラーが発生しました: ${e.message}`);
       }
       await sleep(150);
     }
@@ -237,9 +250,10 @@ async function pollOnceAll() {
       const now = Date.now();
       const rt = await getRuntime();
       rt.lastRunAt = now;
+      rt.isChecking = false;
       await setRuntime(rt);
       chrome.action.setBadgeText({ text: changedCount ? String(Math.min(99, changedCount)) : "" });
-      chrome.runtime.sendMessage({ type: "bgDone", changedCount, at: now }).catch(()=>{});
+      addLog(`✅ チェック完了（${changedCount}件の変更を検知）`);
     } finally {
       // This must always run to prevent the queue from getting stuck.
       queueRunning = false;
@@ -250,7 +264,11 @@ async function pollOnceAll() {
 
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === ALARM_NAME || a.name === IMMEDIATE_ALARM_NAME) {
-    chrome.runtime.sendMessage({ type: "bgTick", name: a.name, when: Date.now() }).catch(()=>{});
+    addLog(`⏰ アラーム(${a.name})が発火しました。`);
+    if (queueRunning) {
+      addLog(`🏃‍♀️ 既に別のチェックが実行中のため、今回の起動はスキップします。`);
+      return;
+    }
     await pollOnceAll();
     if (a.name === IMMEDIATE_ALARM_NAME) await chrome.alarms.clear(IMMEDIATE_ALARM_NAME);
   }

@@ -163,7 +163,22 @@ function renderTable(state) {
 }
 
 function setStatus(msg) {
-  statusBox.textContent = msg + "\n" + statusBox.textContent;
+  // This function is now only for temporary status updates
+  statusBox.textContent = msg;
+}
+
+function renderLogs(logs) {
+  if (!logs || !logs.length) {
+    statusBox.textContent = "（ログはありません）";
+    return;
+  }
+  const lines = logs.map(log => `[${new Date(log.ts).toLocaleString()}] ${log.msg}`);
+  statusBox.textContent = lines.join("\n");
+}
+
+function updateButtonStates(isChecking) {
+  pokeBtn.disabled = isChecking;
+  stopBtn.hidden = !isChecking;
 }
 
 async function load() {
@@ -178,8 +193,20 @@ async function load() {
     intervalEl.value = st.intervalMinutes || 10;
     bgEnabledEl.checked = !!st.bgPollingEnabled;
     renderTable(st);
+    renderLogs(st.logs);
+    updateButtonStates(st.isChecking);
   }
 }
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.runtime) {
+    const newRuntime = changes.runtime.newValue;
+    renderLogs(newRuntime.logs);
+    updateButtonStates(newRuntime.isChecking);
+    // Re-render table to update status icons
+    renderTable(newRuntime);
+  }
+});
 
 saveBtn.addEventListener("click", async () => {
   const rawIdsText = idsEl.value;
@@ -228,28 +255,7 @@ diagBtn.addEventListener("click", async () => {
   setStatus(`⚙️ 診断\n- 背景監視: ${enabled}\n- 前回実行: ${lastRun}\n- アラーム一覧:\n${nexts}`);
 });
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type === "bgStart") {
-    setStatus(`⏳ チェック開始: ${msg.ids.length} 件`);
-    pokeBtn.disabled = true;
-    stopBtn.hidden = false;
-  } else if (msg?.type === "bgResult") {
-    const id = msg.incidentId;
-    const st = msg.result;
-    const icon = st.ok ? (st.changed ? "🟢" : "⚪") : "❌";
-    const line = `${icon} ${id}: ${st.ok ? (st.changed ? "変更あり" : "変更なし") : "失敗"} ${st.note ? "｜ " + String(st.note).slice(0,60) : ""}`;
-    setStatus(line);
-    chrome.runtime.sendMessage({ type: "getSettings" }).then(res => res?.state && renderTable(res.state));
-  } else if (msg?.type === "bgDone") {
-    const when = new Date(msg.at).toLocaleString();
-    setStatus(`✅ チェック完了（変更: ${msg.changedCount}） @ ${when}`);
-    pokeBtn.disabled = false;
-    stopBtn.hidden = true;
-  } else if (msg?.type === "bgTick") {
-    const when = new Date(msg.when).toLocaleString();
-    setStatus(`⏰ アラーム(${msg.name})発火 @ ${when}`);
-  }
-});
+// ログはストレージから読み込むので、動的なメッセージリスナーは不要
 
 // modal close
 pvClose.onclick = () => { modal.style.display = "none"; };
