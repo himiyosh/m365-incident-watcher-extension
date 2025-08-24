@@ -94,8 +94,8 @@
     if (document.readyState !== "complete") {
       await new Promise(res => window.addEventListener("load", res, { once: true }));
     }
-    // SPA レンダー完了を待つ（最大45s）
-    await waitForMeaningfulContent({ timeoutMs: 45000, quietMs: 800 });
+    // SPA レンダー完了を待つ（最大45s, 安定化1.5s）
+    await waitForMeaningfulContent({ timeoutMs: 45000, quietMs: 1500 });
     await sendSnapshot("init");
   })();
 })();
