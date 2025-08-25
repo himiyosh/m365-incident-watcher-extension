@@ -229,6 +229,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function finishPolling(changedCount = 0, message = null) {
   if (message) addLog(message);
+  addLog("🏁 finishing poll...");
 
   if (heartbeatIntervalId) {
     clearInterval(heartbeatIntervalId);
@@ -245,6 +246,7 @@ async function finishPolling(changedCount = 0, message = null) {
     }
     chrome.action.setBadgeText({ text: changedCount > 0 ? String(Math.min(99, changedCount)) : "" });
   } finally {
+    addLog("🚩 resetting flags...");
     queueRunning = false;
     stopFlag = false;
   }
@@ -252,8 +254,12 @@ async function finishPolling(changedCount = 0, message = null) {
 
 // 逐次：同一バッチ内で連続処理
 async function pollOnceAll() {
-  if (queueRunning) return;
+  if (queueRunning) {
+    addLog("  (skip: queueRunning is true)");
+    return;
+  }
 
+  addLog("🚀 pollOnceAll started");
   stopFlag = false;
   queueRunning = true;
 
@@ -405,12 +411,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       pollOnceAll();
       sendResponse({ ok: true });
     } else if (msg?.type === "stop") {
+      addLog("⏹️ stop request received.");
       stopFlag = true;
       if (activeCheckTabId) {
         chrome.tabs.remove(activeCheckTabId).catch(() => {});
         activeCheckTabId = null;
       }
-      // UI state etc. should be reset immediately
       finishPolling(0, "stop");
       sendResponse({ ok: true });
     } else if (msg?.type === "snapshotFromCS") {
