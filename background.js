@@ -234,9 +234,15 @@ async function pollOnceAll() {
 
   let changedCount = 0;
 
+  // Keep service worker alive during long polling
+  const heartbeat = setInterval(() => {
+    chrome.runtime.getPlatformInfo().catch(() => {});
+  }, 25 * 1000);
+
   const processQueue = async (index) => {
     if (index >= ids.length || stopFlag) {
       if (stopFlag) addLog(`⏹️ ユーザーリクエストによりチェックを中断しました。`);
+      clearInterval(heartbeat); // Stop heartbeat
 
       try {
         const finalRt = await getRuntime();
