@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "M365 Incident Watcher (v1.7.8)",
-  "version": "1.7.8",
+  "name": "M365 Incident Watcher (v1.7.9)",
+  "version": "1.7.9",
   "description": "lynx.office.net のインシデント更新を検知して通知します。",
   "permissions": ["storage", "alarms", "notifications", "tabs", "scripting", "webNavigation"],
   "host_permissions": ["https://lynx.office.net/*"],

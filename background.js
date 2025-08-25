@@ -110,22 +110,31 @@ function sanitizeHtml(html) {
   }
 }
 
+chrome.notifications.onClicked.addListener((clickedId) => {
+  if (clickedId && String(clickedId).startsWith("incident:")) {
+    const id = clickedId.split(":")[1];
+    const url = `https://lynx.office.net/incident/${encodeURIComponent(id)}`;
+    chrome.tabs.create({ url });
+  }
+});
+
 async function notifyChange(incidentId, title, hint) {
-  const res = await createNotificationBase({
-    type: "basic",
-    title: `${title || `Incident ${incidentId}`} が更新されました`,
-    message: (hint || "更新を検知しました").slice(0, 250),
-    priority: 2,
-    id: `incident:${incidentId}:${Date.now()}`
-  });
-  chrome.notifications.onClicked.addListener((clickedId) => {
-    if (clickedId && String(clickedId).startsWith("incident:")) {
-      const id = clickedId.split(":")[1];
-      const url = `https://lynx.office.net/incident/${encodeURIComponent(id)}`;
-      chrome.tabs.create({ url });
+  try {
+    const res = await createNotificationBase({
+      type: "basic",
+      title: `${title || `Incident ${incidentId}`} が更新されました`,
+      message: (hint || "更新を検知しました").slice(0, 250),
+      priority: 2,
+      id: `incident:${incidentId}:${Date.now()}`
+    });
+    if (!res.ok) {
+      addLog(`⚠️ 通知の作成に失敗しました: ${res.error}`);
     }
-  });
-  return res;
+    return res;
+  } catch(e) {
+    console.error(`[${new Date().toISOString()}] Critical error in notifyChange for ${incidentId}:`, e);
+    addLog(`🔥 通知処理で致命的なエラー: ${e.message}`);
+  }
 }
 
 async function handleSnapshotFromCS({ incidentId, title, snapshotText, contentText, snapshotHtml }) {
