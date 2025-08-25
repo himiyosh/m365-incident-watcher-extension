@@ -15,10 +15,11 @@
     <textarea id="ids" rows="5" class="mono" placeholder="TM1139221 TM1234567 ...（空白/改行/カンマ区切り）"></textarea>
     <div class="toolbar">
       <label>チェック間隔(分): <input id="interval" type="number" min="1" step="1" class="num"></label>
-      <label><input id="bgEnabled" type="checkbox"> 背景監視</label>
+      <label><input id="bgEnabled" type="checkbox"> バックグラウンドで監視する</label>
       <div class="spacer"></div>
       <button id="saveBtn" class="btn primary">保存</button>
       <button id="pokeBtn" class="btn">今すぐ検知</button>
+      <button id="stopBtn" class="btn danger" hidden>チェックを停止</button>
       <button id="testNotifyBtn" class="btn">通知テスト</button>
       <button id="diagBtn" class="btn">診断</button>
     </div>

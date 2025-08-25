@@ -9,7 +9,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const DEFAULT_RUNTIME = {
-  lastHashes: {},
+  lastModifiedDates: {},
   lastChangeAt: {},
   lastSnapshot: {},   // text
   prevSnapshot: {},   // text
@@ -17,7 +17,9 @@ const DEFAULT_RUNTIME = {
   prevHtml: {},       // html (sanitized)
   lastCheckAt: {},
   lastStatus: {},
-  lastRunAt: null
+  lastRunAt: null,
+  logs: [],
+  isChecking: false
 };
 
 const ALARM_NAME = "incident-bg-poll";
@@ -59,11 +61,16 @@ async function getRuntime() {
   const { runtime } = await chrome.storage.local.get("runtime");
   return { ...DEFAULT_RUNTIME, ...(runtime || {}) };
 }
-async function setRuntime(patch) {
-  const cur = await getRuntime();
-  const merged = { ...cur, ...(patch || {}) };
-  await chrome.storage.local.set({ runtime: merged });
-  return merged;
+async function setRuntime(newRuntime) {
+  await chrome.storage.local.set({ runtime: newRuntime });
+  return newRuntime;
+}
+
+const MAX_LOGS = 100;
+async function addLog(message) {
+  const runtime = await getRuntime();
+  const newLogs = [{ ts: Date.now(), msg: message }, ...runtime.logs].slice(0, MAX_LOGS);
+  await setRuntime({ ...runtime, logs: newLogs });
 }
 
 async function sha256Hex(str) {
@@ -73,7 +80,7 @@ async function sha256Hex(str) {
 
 function sanitizeText(t) {
   return (t || "")
-    .replace(/\s+/g, " ")
+    .replace(/[ \t]+/g, " ") // Keep newlines for diff view
     .replace(/request[-_ ]?id[:=]?\s*[a-f0-9-]+/ig, "")
     .replace(/updated[:=]?\s*\d{4}-\d{2}-\d{2}[ t]\d{2}:\d{2}:\d{2}(?:\.\d+)?z?/ig, "")
     .trim();
@@ -103,58 +110,81 @@ function sanitizeHtml(html) {
   }
 }
 
+chrome.notifications.onClicked.addListener((clickedId) => {
+  if (clickedId && String(clickedId).startsWith("incident:")) {
+    const id = clickedId.split(":")[1];
+    const url = `https://lynx.office.net/incident/${encodeURIComponent(id)}`;
+    chrome.tabs.create({ url });
+  }
+});
+
 async function notifyChange(incidentId, title, hint) {
-  const res = await createNotificationBase({
-    type: "basic",
-    title: `${title || `Incident ${incidentId}`} が更新されました`,
-    message: (hint || "更新を検知しました").slice(0, 250),
-    priority: 2,
-    id: `incident:${incidentId}:${Date.now()}`
-  });
-  chrome.notifications.onClicked.addListener((clickedId) => {
-    if (clickedId && String(clickedId).startsWith("incident:")) {
-      const id = clickedId.split(":")[1];
-      const url = `https://lynx.office.net/incident/${encodeURIComponent(id)}`;
-      chrome.tabs.create({ url });
+  try {
+    const res = await createNotificationBase({
+      type: "basic",
+      title: `${title || `Incident ${incidentId}`} が更新されました`,
+      message: (hint || "更新を検知しました").slice(0, 250),
+      priority: 2,
+      id: `incident:${incidentId}:${Date.now()}`
+    });
+    if (!res.ok) {
+      addLog(`⚠️ 通知の作成に失敗しました: ${res.error}`);
     }
-  });
-  return res;
+    return res;
+  } catch(e) {
+    console.error(`[${new Date().toISOString()}] Critical error in notifyChange for ${incidentId}:`, e);
+    addLog(`🔥 通知処理で致命的なエラー: ${e.message}`);
+  }
 }
 
-async function handleSnapshotFromCS({ incidentId, title, snapshotText, snapshotHtml }) {
+async function handleSnapshotFromCS({ incidentId, title, snapshotText, modifiedDate, snapshotHtml }) {
   const now = Date.now();
-  const runtime = await getRuntime();
+  const oldRuntime = await getRuntime();
   const result = { ok: false, changed: false, note: "" };
 
-  // 空テキストは NO_SNAPSHOT
-  if (!incidentId || !snapshotText || !snapshotText.trim()) {
-    result.ok = false; result.note = "NO_SNAPSHOT";
-  } else {
-    const normText = sanitizeText(snapshotText);
-    const hash = await sha256Hex(normText);
-    const prevHash = runtime.lastHashes[incidentId];
-    const safeHtml = sanitizeHtml(snapshotHtml || "");
+  const fullNormText = sanitizeText(snapshotText);
 
-    if (prevHash && prevHash !== hash) {
-      runtime.prevSnapshot[incidentId] = runtime.lastSnapshot[incidentId] || "";
-      runtime.prevHtml[incidentId] = runtime.lastHtml[incidentId] || "";
-      runtime.lastChangeAt[incidentId] = now;
-      result.changed = true;
-      await notifyChange(incidentId, title || `Incident ${incidentId}`, normText.slice(0, 200));
-    }
-
-    runtime.lastHashes[incidentId]   = hash;
-    runtime.lastSnapshot[incidentId] = normText;
-    runtime.lastHtml[incidentId]     = safeHtml;
-
-    result.ok = true;
-    result.note = normText.slice(0, 120);
+  if (!incidentId || !modifiedDate) {
+    result.ok = false;
+    result.note = "NO_DATE";
+    const nextRuntime = {
+      ...oldRuntime,
+      lastCheckAt: { ...oldRuntime.lastCheckAt, [incidentId]: now },
+      lastStatus: { ...oldRuntime.lastStatus, [incidentId]: { ...result } },
+    };
+    await setRuntime(nextRuntime);
+    return result;
   }
-  runtime.lastCheckAt[incidentId] = now;
-  runtime.lastStatus[incidentId] = { ...result };
-  await setRuntime(runtime);
 
-  chrome.runtime.sendMessage({ type: "bgResult", incidentId, result }).catch(()=>{});
+  const prevDate = oldRuntime.lastModifiedDates[incidentId];
+  const newRuntime = { ...oldRuntime };
+
+  if (prevDate && prevDate !== modifiedDate) {
+    result.changed = true;
+    console.log(`[${new Date().toISOString()}] Change detected for ${incidentId}. Notifying.`);
+
+    newRuntime.prevSnapshot = { ...oldRuntime.prevSnapshot, [incidentId]: oldRuntime.lastSnapshot?.[incidentId] || "" };
+    newRuntime.prevHtml = { ...oldRuntime.prevHtml, [incidentId]: oldRuntime.lastHtml?.[incidentId] || "" };
+    newRuntime.lastChangeAt = { ...oldRuntime.lastChangeAt, [incidentId]: now };
+
+    await notifyChange(incidentId, title || `Incident ${incidentId}`, fullNormText.slice(0, 200));
+    await sleep(1000); // Keep worker alive for 1s to ensure notification is displayed
+  }
+
+  newRuntime.lastModifiedDates = { ...oldRuntime.lastModifiedDates, [incidentId]: modifiedDate };
+  newRuntime.lastSnapshot = { ...oldRuntime.lastSnapshot, [incidentId]: fullNormText };
+  newRuntime.lastHtml = { ...oldRuntime.lastHtml, [incidentId]: sanitizeHtml(snapshotHtml) };
+
+  result.ok = true;
+  result.note = `Modified: ${modifiedDate}`;
+
+  newRuntime.lastCheckAt = { ...oldRuntime.lastCheckAt, [incidentId]: now };
+  newRuntime.lastStatus = { ...oldRuntime.lastStatus, [incidentId]: { ...result } };
+
+  await setRuntime(newRuntime);
+  const icon = result.ok ? (result.changed ? "🟢" : "⚪") : "❌";
+  const statusTxt = result.ok ? (result.changed ? "変更あり" : "変更なし") : "失敗";
+  addLog(`${icon} ${incidentId}: ${statusTxt}`);
   return result;
 }
 
@@ -182,126 +212,171 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 let queueRunning = false;
+let stopFlag = false;
+let activeCheckTabId = null;
+let heartbeatIntervalId = null;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function finishPolling(changedCount = 0, message = null) {
+  if (message) addLog(message);
+  addLog("🏁 finishing poll...");
+
+  if (heartbeatIntervalId) {
+    clearInterval(heartbeatIntervalId);
+    heartbeatIntervalId = null;
+  }
+
+  try {
+    const finalRt = await getRuntime();
+    finalRt.lastRunAt = Date.now();
+    finalRt.isChecking = false;
+    await setRuntime(finalRt);
+    if (message !== "stop") { // Don't overwrite "stopped" log with "complete"
+      addLog(`✅ チェック完了（${changedCount}件の変更を検知）`);
+    }
+    chrome.action.setBadgeText({ text: changedCount > 0 ? String(Math.min(99, changedCount)) : "" });
+  } finally {
+    addLog("🚩 resetting flags...");
+    queueRunning = false;
+    stopFlag = false;
+  }
+}
 
 // 逐次：同一バッチ内で連続処理
 async function pollOnceAll() {
-  const s = await getSettings();
-  if (!s.bgPollingEnabled) return;
-  const ids = (s.incidentIds || []).map(x => x.trim()).filter(Boolean);
-  if (!ids.length) return;
-  if (queueRunning) return;
+  if (queueRunning) {
+    addLog("  (skip: queueRunning is true)");
+    return;
+  }
+
+  addLog("🚀 pollOnceAll started");
+  stopFlag = false;
   queueRunning = true;
 
-  chrome.runtime.sendMessage({ type: "bgStart", ids }).catch(()=>{});
+  const s = await getSettings();
+  if (!s.bgPollingEnabled) { queueRunning = false; return; }
+  const ids = (s.incidentIds || []).map(x => x.trim()).filter(Boolean);
+  if (!ids.length) { queueRunning = false; return; }
+
+  const rt = await getRuntime();
+  await setRuntime({ ...rt, isChecking: true });
+  addLog(`⏳ チェック開始: ${ids.length} 件`);
+
   let changedCount = 0;
 
-  try {
-    for (const id of ids) {
+  // Keep service worker alive during long polling
+  heartbeatIntervalId = setInterval(() => {
+    chrome.runtime.getPlatformInfo().catch(() => {});
+  }, 25 * 1000);
+
+  const processQueue = async (index) => {
+    if (index >= ids.length || stopFlag) {
+      finishPolling(changedCount, stopFlag ? `⏹️ ユーザーリクエストによりチェックを中断しました。` : null);
+      return;
+    }
+
+    const id = ids[index];
+    try {
       const r = await openInactiveTabAndSnapshot(id);
       if (r?.changed) changedCount++;
-      await sleep(150);
+    } catch (e) {
+      console.error(`[${new Date().toISOString()}] Error processing ID ${id}, continuing poll.`, e);
+      addLog(`❌ ID ${id} の処理中にエラーが発生しました: ${e.message}`);
     }
-  } finally {
-    const now = Date.now();
-    const rt = await getRuntime();
-    rt.lastRunAt = now;
-    await setRuntime(rt);
-    chrome.action.setBadgeText({ text: changedCount ? String(Math.min(99, changedCount)) : "" });
-    chrome.runtime.sendMessage({ type: "bgDone", changedCount, at: now }).catch(()=>{});
-    queueRunning = false;
-  }
+
+    setTimeout(() => processQueue(index + 1), 250);
+  };
+
+  processQueue(0);
 }
 
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === ALARM_NAME || a.name === IMMEDIATE_ALARM_NAME) {
-    chrome.runtime.sendMessage({ type: "bgTick", name: a.name, when: Date.now() }).catch(()=>{});
+    addLog(`⏰ アラーム(${a.name})が発火しました。`);
+    if (queueRunning) {
+      addLog(`🏃‍♀️ 既に別のチェックが実行中のため、今回の起動はスキップします。`);
+      return;
+    }
     await pollOnceAll();
     if (a.name === IMMEDIATE_ALARM_NAME) await chrome.alarms.clear(IMMEDIATE_ALARM_NAME);
   }
 });
 
+// イベント駆動でスナップショットを取得
 async function openInactiveTabAndSnapshot(incidentId) {
   const url = `https://lynx.office.net/incident/${encodeURIComponent(incidentId)}`;
-  const wins = await chrome.windows.getAll({ populate: false, windowTypes: ["normal"] });
-  let targetWindowId = wins.length ? wins[0].id : (await chrome.windows.create({ focused: false })).id;
+  let onSnapshotListener = null;
+  let timeoutId = null;
 
-  const tab = await chrome.tabs.create({ url, active: false, windowId: targetWindowId });
-  const tabId = tab.id;
-  let finished = false;
-  let lastResult = null;
-  let loadCompleteAt = 0;
-
-  const onUpdated = (tid, info) => {
-    if (tid === tabId) {
-      if (info.status === "complete") loadCompleteAt = Date.now();
+  const cleanup = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (onSnapshotListener) chrome.runtime.onMessage.removeListener(onSnapshotListener);
+    if (activeCheckTabId) {
+      const closingTabId = activeCheckTabId;
+      activeCheckTabId = null; // Clear immediately to prevent race conditions
+      chrome.tabs.remove(closingTabId).catch(e => {
+        console.error(`[${new Date().toISOString()}] Failed to remove tab ${closingTabId} for incident ${incidentId}.`, e);
+      });
     }
   };
-  const onSnapshot = async (msg, sender) => {
-    if (msg?.type === "snapshotFromCS" && sender.tab && sender.tab.id === tabId && msg.payload?.incidentId === incidentId) {
-      lastResult = await handleSnapshotFromCS(msg.payload);
-      finished = true;
-      cleanup();
-    }
-  };
-  function cleanup() {
-    chrome.tabs.onUpdated.removeListener(onUpdated);
-    chrome.runtime.onMessage.removeListener(onSnapshot);
-    chrome.tabs.remove(tabId, () => {});
-  }
 
-  chrome.tabs.onUpdated.addListener(onUpdated);
-  chrome.runtime.onMessage.addListener(onSnapshot);
-
-  const started = Date.now();
-  // 1) 初回ロード完了を最大 30s 待つ
-  while (!loadCompleteAt && Date.now() - started < 30000) await sleep(200);
-
-  // 2) 完了後も SPA の初期描画を 5s ほど猶予
-  if (loadCompleteAt) {
-    await sleep(5000);
-    await ensureInjectedAndPoke(tabId);
-  }
-
-  // 3) 最大 90s 粘る（45s でハードリロード→再注入）
-  while (!finished && Date.now() - started < 90000) {
-    const elapsed = Date.now() - started;
-
-    if (elapsed > 45000 && elapsed < 48000) {
-      try { await chrome.tabs.reload(tabId, { bypassCache: true }); loadCompleteAt = 0; } catch {}
-    }
-
-    if (!loadCompleteAt) {
-      const t0 = Date.now();
-      while (!loadCompleteAt && Date.now() - t0 < 10000) await sleep(200);
-      if (loadCompleteAt) {
-        await sleep(2500);
-        await ensureInjectedAndPoke(tabId);
+  return new Promise(async (resolve) => {
+    onSnapshotListener = async (msg, sender) => {
+      if (msg?.type === "snapshotFromCS" && sender.tab?.id === activeCheckTabId && msg.payload?.incidentId === incidentId) {
+        try {
+          const result = await handleSnapshotFromCS(msg.payload);
+          resolve(result);
+        } catch (e) {
+          console.error(`[${new Date().toISOString()}] Error in handleSnapshotFromCS for ${incidentId}.`, e);
+          resolve({ ok: false, changed: false, note: `HANDLE_ERROR: ${e.message}` });
+        } finally {
+          cleanup();
+        }
       }
-    } else {
-      await ensureInjectedAndPoke(tabId);
+    };
+
+    timeoutId = setTimeout(() => {
+      const note = "TIMEOUT";
+      cleanup();
+      getRuntime().then(rt => {
+        rt.lastCheckAt[incidentId] = Date.now();
+        rt.lastStatus[incidentId] = { ok: false, changed: false, note };
+        setRuntime(rt).then(() => resolve(rt.lastStatus[incidentId]));
+      });
+    }, 90000);
+
+    try {
+      chrome.runtime.onMessage.addListener(onSnapshotListener);
+      const wins = await chrome.windows.getAll({ populate: false, windowTypes: ["normal"] });
+      const targetWindowId = wins.length > 0 ? wins[0].id : (await chrome.windows.create({ focused: false })).id;
+      const tab = await chrome.tabs.create({ url, active: false, windowId: targetWindowId });
+      activeCheckTabId = tab.id;
+
+      await new Promise(res => {
+        const listener = (tid, info) => {
+          if (tid === activeCheckTabId && info.status === "complete") {
+            chrome.tabs.onUpdated.removeListener(listener);
+            res();
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+      });
+
+      if (!activeCheckTabId) throw new Error("Tab was closed before script injection.");
+      await chrome.scripting.executeScript({
+        target: { tabId: activeCheckTabId },
+        files: ["content-script.js"],
+      });
+    } catch (e) {
+      const note = `ERROR: ${e?.message || e}`;
+      cleanup();
+      getRuntime().then(rt => {
+        rt.lastCheckAt[incidentId] = Date.now();
+        rt.lastStatus[incidentId] = { ok: false, changed: false, note };
+        setRuntime(rt).then(() => resolve(rt.lastStatus[incidentId]));
+      });
     }
-    await sleep(2500);
-  }
-
-  if (!finished) {
-    const rt = await getRuntime();
-    rt.lastCheckAt[incidentId] = Date.now();
-    rt.lastStatus[incidentId] = { ok: false, changed: false, note: "TIMEOUT" };
-    await setRuntime(rt);
-    chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(()=>{});
-    cleanup();
-  }
-  return lastResult;
-}
-
-async function ensureInjectedAndPoke(tabId) {
-  try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["content-script.js"] });
-  } catch {}
-  try {
-    await chrome.tabs.sendMessage(tabId, { type: "poke" }, () => {});
-  } catch {}
+  });
 }
 
 // ===== messaging =====
@@ -324,6 +399,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: true, state: { ...s, ...r } });
     } else if (msg?.type === "pokeAll") {
       pollOnceAll();
+      sendResponse({ ok: true });
+    } else if (msg?.type === "stop") {
+      addLog("⏹️ stop request received.");
+      stopFlag = true;
+      if (activeCheckTabId) {
+        chrome.tabs.remove(activeCheckTabId).catch(() => {});
+        activeCheckTabId = null;
+      }
+      finishPolling(0, "stop");
       sendResponse({ ok: true });
     } else if (msg?.type === "snapshotFromCS") {
       const res = await handleSnapshotFromCS(msg.payload);
