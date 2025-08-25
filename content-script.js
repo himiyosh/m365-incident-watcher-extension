@@ -12,9 +12,11 @@
   function captureSnapshots() {
     const html = document.documentElement ? document.documentElement.outerHTML : "<html></html>";
     const text = document.body ? (document.body.innerText || "") : "";
-    const mainContent = document.querySelector("main, [role='main']");
-    const contentText = mainContent ? mainContent.innerText : text;
-    return { text, html, contentText, title: document.title || "" };
+
+    const modifiedDateMatch = text.match(/Modified:\s*([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{2}:\d{2})/i);
+    const modifiedDate = modifiedDateMatch ? modifiedDateMatch[1] : null;
+
+    return { text, html, modifiedDate, title: document.title || "" };
   }
 
   function isContentReady() {
@@ -62,15 +64,15 @@
 
   async function sendSnapshot(kind = "auto") {
     const incidentId = getIncidentIdFromUrl();
-    const { text, html, contentText, title } = captureSnapshots();
+    const { text, html, modifiedDate, title } = captureSnapshots();
     chrome.runtime.sendMessage({
       type: "snapshotFromCS",
       payload: {
         incidentId,
         title,
         snapshotText: text,
-        contentText: contentText,
         snapshotHtml: html,
+        modifiedDate: modifiedDate,
         by: kind
       }
     }, () => {});

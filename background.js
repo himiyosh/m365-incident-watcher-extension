@@ -9,7 +9,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const DEFAULT_RUNTIME = {
-  lastHashes: {},
+  lastModifiedDates: {},
   lastChangeAt: {},
   lastSnapshot: {},   // text
   prevSnapshot: {},   // text
@@ -137,41 +137,32 @@ async function notifyChange(incidentId, title, hint) {
   }
 }
 
-async function handleSnapshotFromCS({ incidentId, title, snapshotText, contentText, snapshotHtml }) {
+async function handleSnapshotFromCS({ incidentId, title, snapshotText, modifiedDate, snapshotHtml }) {
   const now = Date.now();
   const oldRuntime = await getRuntime();
   const result = { ok: false, changed: false, note: "" };
 
-  // Use contentText for comparison, but full snapshotText for notes/previews
-  const textToHash = sanitizeText(contentText);
   const fullNormText = sanitizeText(snapshotText);
 
-  if (!incidentId || !textToHash) {
+  if (!incidentId || !modifiedDate) {
     result.ok = false;
-    result.note = "NO_CONTENT";
+    result.note = "NO_DATE";
     const nextRuntime = {
       ...oldRuntime,
       lastCheckAt: { ...oldRuntime.lastCheckAt, [incidentId]: now },
       lastStatus: { ...oldRuntime.lastStatus, [incidentId]: { ...result } },
     };
     await setRuntime(nextRuntime);
-    chrome.runtime.sendMessage({ type: "bgResult", incidentId, result }).catch(()=>{});
     return result;
   }
 
-  // Sanitize and hash the new TEXT content
-  const hash = await sha256Hex(textToHash);
-  const prevHash = oldRuntime.lastHashes[incidentId];
-
-  // Sanitize HTML for preview
-  const safeFullHtml = sanitizeHtml(snapshotHtml);
+  const prevDate = oldRuntime.lastModifiedDates[incidentId];
   const newRuntime = { ...oldRuntime };
 
-  if (prevHash && prevHash !== hash) {
+  if (prevDate && prevDate !== modifiedDate) {
     result.changed = true;
     console.log(`[${new Date().toISOString()}] Change detected for ${incidentId}. Notifying.`);
 
-    // Copy the last known state to the "previous" state fields
     newRuntime.prevSnapshot = { ...oldRuntime.prevSnapshot, [incidentId]: oldRuntime.lastSnapshot?.[incidentId] || "" };
     newRuntime.prevHtml = { ...oldRuntime.prevHtml, [incidentId]: oldRuntime.lastHtml?.[incidentId] || "" };
     newRuntime.lastChangeAt = { ...oldRuntime.lastChangeAt, [incidentId]: now };
@@ -179,15 +170,13 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, contentTe
     await notifyChange(incidentId, title || `Incident ${incidentId}`, fullNormText.slice(0, 200));
   }
 
-  // Always update the "last" state fields with the current data
-  newRuntime.lastHashes = { ...oldRuntime.lastHashes, [incidentId]: hash };
+  newRuntime.lastModifiedDates = { ...oldRuntime.lastModifiedDates, [incidentId]: modifiedDate };
   newRuntime.lastSnapshot = { ...oldRuntime.lastSnapshot, [incidentId]: fullNormText };
-  newRuntime.lastHtml = { ...oldRuntime.lastHtml, [incidentId]: safeFullHtml };
+  newRuntime.lastHtml = { ...oldRuntime.lastHtml, [incidentId]: sanitizeHtml(snapshotHtml) };
 
   result.ok = true;
-  result.note = fullNormText.slice(0, 120);
+  result.note = `Modified: ${modifiedDate}`;
 
-  // Update check time and status
   newRuntime.lastCheckAt = { ...oldRuntime.lastCheckAt, [incidentId]: now };
   newRuntime.lastStatus = { ...oldRuntime.lastStatus, [incidentId]: { ...result } };
 
