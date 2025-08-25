@@ -218,53 +218,53 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // 逐次：同一バッチ内で連続処理
 async function pollOnceAll() {
-  stopFlag = false; // Reset stop flag on new run
-  const s = await getSettings();
-  if (!s.bgPollingEnabled) return;
-  const ids = (s.incidentIds || []).map(x => x.trim()).filter(Boolean);
-  if (!ids.length) return;
   if (queueRunning) return;
+
+  stopFlag = false;
   queueRunning = true;
 
-  // Update isChecking flag without overwriting the whole runtime
-  (async () => {
-    const rt = await getRuntime();
-    await setRuntime({ ...rt, isChecking: true });
-  })();
+  const s = await getSettings();
+  if (!s.bgPollingEnabled) { queueRunning = false; return; }
+  const ids = (s.incidentIds || []).map(x => x.trim()).filter(Boolean);
+  if (!ids.length) { queueRunning = false; return; }
 
+  const rt = await getRuntime();
+  await setRuntime({ ...rt, isChecking: true });
   addLog(`⏳ チェック開始: ${ids.length} 件`);
+
   let changedCount = 0;
 
-  try {
-    for (const id of ids) {
-      if (stopFlag) {
-        addLog(`⏹️ ユーザーリクエストによりチェックを中断しました。`);
-        break;
-      }
+  const processQueue = async (index) => {
+    if (index >= ids.length || stopFlag) {
+      if (stopFlag) addLog(`⏹️ ユーザーリクエストによりチェックを中断しました。`);
+
       try {
-        const r = await openInactiveTabAndSnapshot(id);
-        if (r?.changed) changedCount++;
-      } catch (e) {
-        console.error(`[${new Date().toISOString()}] Error processing ID ${id}, continuing poll.`, e);
-        addLog(`❌ ID ${id} の処理中にエラーが発生しました: ${e.message}`);
+        const finalRt = await getRuntime();
+        finalRt.lastRunAt = Date.now();
+        finalRt.isChecking = false;
+        await setRuntime(finalRt);
+        addLog(`✅ チェック完了（${changedCount}件の変更を検知）`);
+        chrome.action.setBadgeText({ text: changedCount > 0 ? String(Math.min(99, changedCount)) : "" });
+      } finally {
+        queueRunning = false;
+        stopFlag = false;
       }
-      await sleep(150);
+      return;
     }
-  } finally {
+
+    const id = ids[index];
     try {
-      const now = Date.now();
-      const rt = await getRuntime();
-      rt.lastRunAt = now;
-      rt.isChecking = false;
-      await setRuntime(rt);
-      chrome.action.setBadgeText({ text: changedCount ? String(Math.min(99, changedCount)) : "" });
-      addLog(`✅ チェック完了（${changedCount}件の変更を検知）`);
-    } finally {
-      // This must always run to prevent the queue from getting stuck.
-      queueRunning = false;
-      stopFlag = false;
+      const r = await openInactiveTabAndSnapshot(id);
+      if (r?.changed) changedCount++;
+    } catch (e) {
+      console.error(`[${new Date().toISOString()}] Error processing ID ${id}, continuing poll.`, e);
+      addLog(`❌ ID ${id} の処理中にエラーが発生しました: ${e.message}`);
     }
-  }
+
+    setTimeout(() => processQueue(index + 1), 250);
+  };
+
+  processQueue(0);
 }
 
 chrome.alarms.onAlarm.addListener(async (a) => {
