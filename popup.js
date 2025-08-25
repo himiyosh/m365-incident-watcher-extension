@@ -4,6 +4,7 @@ const intervalEl = document.getElementById("interval");
 const bgEnabledEl = document.getElementById("bgEnabled");
 const saveBtn = document.getElementById("saveBtn");
 const pokeBtn = document.getElementById("pokeBtn");
+const stopBtn = document.getElementById("stopBtn");
 const testNotifyBtn = document.getElementById("testNotifyBtn");
 const diagBtn = document.getElementById("diagBtn");
 const statusBox = document.getElementById("statusBox");
@@ -12,11 +13,14 @@ const resultBody = document.getElementById("resultBody");
 // preview modal
 const modal = document.getElementById("previewModal");
 const pvTitle = document.getElementById("pvTitle");
-const pvPre = document.getElementById("pvPre");
+const pvText = document.getElementById("pvText");
+const pvHtml = document.getElementById("pvHtml");
 const pvClose = document.getElementById("pvClose");
-const tabLatest = document.getElementById("tabLatest");
-const tabPrev = document.getElementById("tabPrev");
-const tabDiff = document.getElementById("tabDiff");
+const tabTextLatest = document.getElementById("tabTextLatest");
+const tabTextPrev = document.getElementById("tabTextPrev");
+const tabTextDiff = document.getElementById("tabTextDiff");
+const tabHtmlLatest = document.getElementById("tabHtmlLatest");
+const tabHtmlPrev = document.getElementById("tabHtmlPrev");
 
 function parseIds(text) {
   return text
@@ -67,11 +71,11 @@ function renderTable(state) {
     const note = st?.note ? String(st.note) : "";
 
     row.innerHTML = `
-      <td class="mono">${id}</td>
-      <td>${fmt(checkAt)}</td>
-      <td class="${className}">${icon} ${statusTxt}</td>
-      <td class="mono">${esc(note).slice(0, 80)}</td>
-      <td>
+      <td class="mono col-id">${id}</td>
+      <td class="col-check-at">${fmt(checkAt)}</td>
+      <td class="${className} col-status">${icon} ${statusTxt}</td>
+      <td class="mono col-note">${esc(note).slice(0, 80)}</td>
+      <td class="col-actions">
         <button data-open="${id}">開く</button>
         <button data-prev="${id}">プレビュー</button>
       </td>
@@ -96,24 +100,85 @@ function renderTable(state) {
     btn.addEventListener("click", async () => {
       const incidentId = btn.getAttribute("data-prev");
       pvTitle.textContent = `プレビュー: ${incidentId}`;
-      pvPre.innerHTML = "読み込み中…";
+      pvText.innerHTML = "読み込み中…";
+      pvHtml.style.display = "none";
+      pvText.style.display = "block";
       modal.style.display = "block";
-      const r = await chrome.runtime.sendMessage({ type: "getSnapshots", incidentId }).catch(()=>null);
-      const last = r?.last || "";
-      const prev = r?.prev || "";
 
-      // 既定は最新
-      pvPre.textContent = last || "(スナップショット無し)";
+      const [textR, htmlR] = await Promise.all([
+        chrome.runtime.sendMessage({ type: "getSnapshots", incidentId }),
+        chrome.runtime.sendMessage({ type: "getHtmlSnapshots", incidentId })
+      ]);
 
-      tabLatest.onclick = () => { pvPre.textContent = last || "(スナップショット無し)"; };
-      tabPrev.onclick   = () => { pvPre.textContent = prev || "(前回スナップショット無し)"; };
-      tabDiff.onclick   = () => { pvPre.innerHTML = diffLines(prev, last); };
+      const lastText = textR?.last || "";
+      const prevText = textR?.prev || "";
+      const lastHtml = htmlR?.lastHtml || "";
+      const prevHtml = htmlR?.prevHtml || "";
+
+      const allTabs = [tabTextLatest, tabTextPrev, tabTextDiff, tabHtmlLatest, tabHtmlPrev];
+      const setActiveTab = (activeTab) => {
+        allTabs.forEach(tab => {
+          tab.classList.toggle("active", tab === activeTab);
+        });
+      };
+
+      const showView = (mode) => {
+        pvText.style.display = mode === "text" ? "block" : "none";
+        pvHtml.style.display = mode === "html" ? "block" : "none";
+      };
+
+      // --- Text Tabs ---
+      tabTextLatest.onclick = () => {
+        showView("text");
+        pvText.textContent = lastText || "(スナップショット無し)";
+        setActiveTab(tabTextLatest);
+      };
+      tabTextPrev.onclick = () => {
+        showView("text");
+        pvText.textContent = prevText || "(前回スナップショット無し)";
+        setActiveTab(tabTextPrev);
+      };
+      tabTextDiff.onclick = () => {
+        showView("text");
+        pvText.innerHTML = diffLines(prevText, lastText);
+        setActiveTab(tabTextDiff);
+      };
+
+      // --- HTML Tabs ---
+      tabHtmlLatest.onclick = () => {
+        showView("html");
+        pvHtml.srcdoc = lastHtml || "<html><body>(スナップショット無し)</body></html>";
+        setActiveTab(tabHtmlLatest);
+      };
+      tabHtmlPrev.onclick = () => {
+        showView("html");
+        pvHtml.srcdoc = prevHtml || "<html><body>(前回スナップショット無し)</body></html>";
+        setActiveTab(tabHtmlPrev);
+      };
+
+      // Initial state
+      tabTextLatest.onclick();
     });
   });
 }
 
 function setStatus(msg) {
-  statusBox.textContent = msg + "\n" + statusBox.textContent;
+  // This function is now only for temporary status updates
+  statusBox.textContent = msg;
+}
+
+function renderLogs(logs) {
+  if (!logs || !logs.length) {
+    statusBox.textContent = "（ログはありません）";
+    return;
+  }
+  const lines = logs.map(log => `[${new Date(log.ts).toLocaleString()}] ${log.msg}`);
+  statusBox.textContent = lines.join("\n");
+}
+
+function updateButtonStates(isChecking) {
+  pokeBtn.disabled = isChecking;
+  stopBtn.hidden = !isChecking;
 }
 
 async function load() {
@@ -128,8 +193,20 @@ async function load() {
     intervalEl.value = st.intervalMinutes || 10;
     bgEnabledEl.checked = !!st.bgPollingEnabled;
     renderTable(st);
+    renderLogs(st.logs);
+    updateButtonStates(st.isChecking);
   }
 }
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.runtime) {
+    const newRuntime = changes.runtime.newValue;
+    renderLogs(newRuntime.logs);
+    updateButtonStates(newRuntime.isChecking);
+    // Re-render table to update status icons
+    renderTable(newRuntime);
+  }
+});
 
 saveBtn.addEventListener("click", async () => {
   const rawIdsText = idsEl.value;
@@ -145,6 +222,11 @@ saveBtn.addEventListener("click", async () => {
 pokeBtn.addEventListener("click", async () => {
   setStatus("🔄 バックグラウンドチェックを開始しました…");
   await chrome.runtime.sendMessage({ type: "pokeAll" });
+});
+
+stopBtn.addEventListener("click", async () => {
+  setStatus("⏹️ チェックの中断をリクエストしました…");
+  await chrome.runtime.sendMessage({ type: "stop" });
 });
 
 testNotifyBtn.addEventListener("click", async () => {
@@ -173,24 +255,7 @@ diagBtn.addEventListener("click", async () => {
   setStatus(`⚙️ 診断\n- 背景監視: ${enabled}\n- 前回実行: ${lastRun}\n- アラーム一覧:\n${nexts}`);
 });
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type === "bgStart") {
-    setStatus(`⏳ チェック開始: ${msg.ids.length} 件`);
-  } else if (msg?.type === "bgResult") {
-    const id = msg.incidentId;
-    const st = msg.result;
-    const icon = st.ok ? (st.changed ? "🟢" : "⚪") : "❌";
-    const line = `${icon} ${id}: ${st.ok ? (st.changed ? "変更あり" : "変更なし") : "失敗"} ${st.note ? "｜ " + String(st.note).slice(0,60) : ""}`;
-    setStatus(line);
-    chrome.runtime.sendMessage({ type: "getSettings" }).then(res => res?.state && renderTable(res.state));
-  } else if (msg?.type === "bgDone") {
-    const when = new Date(msg.at).toLocaleString();
-    setStatus(`✅ チェック完了（変更: ${msg.changedCount}） @ ${when}`);
-  } else if (msg?.type === "bgTick") {
-    const when = new Date(msg.when).toLocaleString();
-    setStatus(`⏰ アラーム(${msg.name})発火 @ ${when}`);
-  }
-});
+// ログはストレージから読み込むので、動的なメッセージリスナーは不要
 
 // modal close
 pvClose.onclick = () => { modal.style.display = "none"; };
