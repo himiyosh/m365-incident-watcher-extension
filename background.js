@@ -194,7 +194,7 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, contentTe
   await setRuntime(newRuntime);
   const icon = result.ok ? (result.changed ? "🟢" : "⚪") : "❌";
   const statusTxt = result.ok ? (result.changed ? "変更あり" : "変更なし") : "失敗";
-  addLog(`${icon} ${incidentId}: ${statusTxt} ${result.note ? "｜ " + String(result.note).slice(0,60) : ""}`);
+  addLog(`${icon} ${incidentId}: ${statusTxt}`);
   return result;
 }
 
