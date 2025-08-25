@@ -120,6 +120,7 @@ chrome.notifications.onClicked.addListener((clickedId) => {
 
 async function notifyChange(incidentId, title, hint) {
   try {
+    addLog(`🔔 ${incidentId}: 通知作成を開始します`);
     const res = await createNotificationBase({
       type: "basic",
       title: `${title || `Incident ${incidentId}`} が更新されました`,
@@ -128,12 +129,14 @@ async function notifyChange(incidentId, title, hint) {
       id: `incident:${incidentId}:${Date.now()}`
     });
     if (!res.ok) {
-      addLog(`⚠️ 通知の作成に失敗しました: ${res.error}`);
+      addLog(`⚠️ ${incidentId}: 通知の作成に失敗しました: ${res.error}`);
+    } else {
+      addLog(`✅ ${incidentId}: 通知を送信しました (アイコン: ${res.used})`);
     }
     return res;
   } catch(e) {
     console.error(`[${new Date().toISOString()}] Critical error in notifyChange for ${incidentId}:`, e);
-    addLog(`🔥 通知処理で致命的なエラー: ${e.message}`);
+    addLog(`🔥 ${incidentId}: 通知処理で致命的なエラー: ${e.message}`);
   }
 }
 
@@ -144,9 +147,13 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, modifiedD
 
   const fullNormText = sanitizeText(snapshotText);
 
+  // Add debug logging for date extraction
+  addLog(`📅 ${incidentId}: modifiedDate = "${modifiedDate || 'null'}"`);
+
   if (!incidentId || !modifiedDate) {
     result.ok = false;
     result.note = "NO_DATE";
+    addLog(`❌ ${incidentId}: スナップショット処理をスキップ - ${!incidentId ? 'incidentId不明' : 'modifiedDate取得失敗'}`);
     const nextRuntime = {
       ...oldRuntime,
       lastCheckAt: { ...oldRuntime.lastCheckAt, [incidentId]: now },
@@ -159,15 +166,21 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, modifiedD
   const prevDate = oldRuntime.lastModifiedDates[incidentId];
   const newRuntime = { ...oldRuntime };
 
+  // Add debug logging for change detection
+  addLog(`🔍 ${incidentId}: 変更チェック - 前回: "${prevDate || 'なし'}", 今回: "${modifiedDate}"`);
+
   if (prevDate && prevDate !== modifiedDate) {
     result.changed = true;
     console.log(`[${new Date().toISOString()}] Change detected for ${incidentId}. Notifying.`);
+    addLog(`🟢 ${incidentId}: 変更を検知しました - 通知を送信します`);
 
     newRuntime.prevSnapshot = { ...oldRuntime.prevSnapshot, [incidentId]: oldRuntime.lastSnapshot?.[incidentId] || "" };
     newRuntime.prevHtml = { ...oldRuntime.prevHtml, [incidentId]: oldRuntime.lastHtml?.[incidentId] || "" };
     newRuntime.lastChangeAt = { ...oldRuntime.lastChangeAt, [incidentId]: now };
 
     await notifyChange(incidentId, title || `Incident ${incidentId}`, fullNormText.slice(0, 200));
+  } else {
+    addLog(`⚪ ${incidentId}: 変更なし ${!prevDate ? '(初回チェック)' : ''}`);
   }
 
   newRuntime.lastModifiedDates = { ...oldRuntime.lastModifiedDates, [incidentId]: modifiedDate };

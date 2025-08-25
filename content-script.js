@@ -13,8 +13,38 @@
     const html = document.documentElement ? document.documentElement.outerHTML : "<html></html>";
     const text = document.body ? (document.body.innerText || "") : "";
 
-    const modifiedDateMatch = text.match(/Modified:\s*([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{2}:\d{2})/i);
-    const modifiedDate = modifiedDateMatch ? modifiedDateMatch[1] : null;
+    // Try multiple patterns to extract modified date
+    let modifiedDate = null;
+    
+    // Pattern 1: Original pattern - "Modified: Dec 25, 2023 14:30"
+    let match = text.match(/Modified:\s*([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{2}:\d{2})/i);
+    if (match) {
+      modifiedDate = match[1];
+    } else {
+      // Pattern 2: "Updated:" instead of "Modified:"
+      match = text.match(/Updated:\s*([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{2}:\d{2})/i);
+      if (match) {
+        modifiedDate = match[1];
+      } else {
+        // Pattern 3: "Last modified:" or "Last updated:"
+        match = text.match(/Last\s+(modified|updated):\s*([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{2}:\d{2})/i);
+        if (match) {
+          modifiedDate = match[2];
+        } else {
+          // Pattern 4: More flexible date format with full month names
+          match = text.match(/(Modified|Updated|Last\s+(?:modified|updated)):\s*([A-Za-z]+\s+\d{1,2},\s+\d{4}\s+\d{2}:\d{2})/i);
+          if (match) {
+            modifiedDate = match[2];
+          } else {
+            // Pattern 5: ISO-like date format
+            match = text.match(/(Modified|Updated|Last\s+(?:modified|updated)):\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})/i);
+            if (match) {
+              modifiedDate = match[2];
+            }
+          }
+        }
+      }
+    }
 
     return { text, html, modifiedDate, title: document.title || "" };
   }
