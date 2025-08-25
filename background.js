@@ -214,6 +214,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 let queueRunning = false;
 let stopFlag = false;
+let activeCheckTabId = null;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // 逐次：同一バッチ内で連続処理
@@ -288,25 +289,24 @@ chrome.alarms.onAlarm.addListener(async (a) => {
 // イベント駆動でスナップショットを取得
 async function openInactiveTabAndSnapshot(incidentId) {
   const url = `https://lynx.office.net/incident/${encodeURIComponent(incidentId)}`;
-  let tabId = null;
   let onSnapshotListener = null;
   let timeoutId = null;
 
   const cleanup = () => {
     if (timeoutId) clearTimeout(timeoutId);
     if (onSnapshotListener) chrome.runtime.onMessage.removeListener(onSnapshotListener);
-    if (tabId) {
-      const closingTabId = tabId;
+    if (activeCheckTabId) {
+      const closingTabId = activeCheckTabId;
+      activeCheckTabId = null; // Clear immediately to prevent race conditions
       chrome.tabs.remove(closingTabId).catch(e => {
         console.error(`[${new Date().toISOString()}] Failed to remove tab ${closingTabId} for incident ${incidentId}.`, e);
       });
-      tabId = null;
     }
   };
 
   return new Promise(async (resolve) => {
     onSnapshotListener = async (msg, sender) => {
-      if (msg?.type === "snapshotFromCS" && sender.tab?.id === tabId && msg.payload?.incidentId === incidentId) {
+      if (msg?.type === "snapshotFromCS" && sender.tab?.id === activeCheckTabId && msg.payload?.incidentId === incidentId) {
         try {
           const result = await handleSnapshotFromCS(msg.payload);
           resolve(result);
@@ -321,14 +321,11 @@ async function openInactiveTabAndSnapshot(incidentId) {
 
     timeoutId = setTimeout(() => {
       const note = "TIMEOUT";
-      cleanup(); // cleanup first
+      cleanup();
       getRuntime().then(rt => {
         rt.lastCheckAt[incidentId] = Date.now();
         rt.lastStatus[incidentId] = { ok: false, changed: false, note };
-        setRuntime(rt).then(() => {
-          chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(() => {});
-          resolve(rt.lastStatus[incidentId]);
-        });
+        setRuntime(rt).then(() => resolve(rt.lastStatus[incidentId]));
       });
     }, 90000);
 
@@ -337,11 +334,11 @@ async function openInactiveTabAndSnapshot(incidentId) {
       const wins = await chrome.windows.getAll({ populate: false, windowTypes: ["normal"] });
       const targetWindowId = wins.length > 0 ? wins[0].id : (await chrome.windows.create({ focused: false })).id;
       const tab = await chrome.tabs.create({ url, active: false, windowId: targetWindowId });
-      tabId = tab.id;
+      activeCheckTabId = tab.id;
 
       await new Promise(res => {
         const listener = (tid, info) => {
-          if (tid === tabId && info.status === "complete") {
+          if (tid === activeCheckTabId && info.status === "complete") {
             chrome.tabs.onUpdated.removeListener(listener);
             res();
           }
@@ -349,20 +346,18 @@ async function openInactiveTabAndSnapshot(incidentId) {
         chrome.tabs.onUpdated.addListener(listener);
       });
 
+      if (!activeCheckTabId) throw new Error("Tab was closed before script injection.");
       await chrome.scripting.executeScript({
-        target: { tabId: tabId },
+        target: { tabId: activeCheckTabId },
         files: ["content-script.js"],
       });
     } catch (e) {
       const note = `ERROR: ${e?.message || e}`;
-      cleanup(); // cleanup first
+      cleanup();
       getRuntime().then(rt => {
         rt.lastCheckAt[incidentId] = Date.now();
         rt.lastStatus[incidentId] = { ok: false, changed: false, note };
-        setRuntime(rt).then(() => {
-          chrome.runtime.sendMessage({ type: "bgResult", incidentId, result: rt.lastStatus[incidentId] }).catch(() => {});
-          resolve(rt.lastStatus[incidentId]);
-        });
+        setRuntime(rt).then(() => resolve(rt.lastStatus[incidentId]));
       });
     }
   });
@@ -391,6 +386,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: true });
     } else if (msg?.type === "stop") {
       stopFlag = true;
+      if (activeCheckTabId) {
+        chrome.tabs.remove(activeCheckTabId).catch(() => {});
+        activeCheckTabId = null;
+      }
       sendResponse({ ok: true });
     } else if (msg?.type === "snapshotFromCS") {
       const res = await handleSnapshotFromCS(msg.payload);
