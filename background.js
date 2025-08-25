@@ -224,7 +224,31 @@ chrome.storage.onChanged.addListener((changes, area) => {
 let queueRunning = false;
 let stopFlag = false;
 let activeCheckTabId = null;
+let heartbeatIntervalId = null;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function finishPolling(changedCount = 0, message = null) {
+  if (message) addLog(message);
+
+  if (heartbeatIntervalId) {
+    clearInterval(heartbeatIntervalId);
+    heartbeatIntervalId = null;
+  }
+
+  try {
+    const finalRt = await getRuntime();
+    finalRt.lastRunAt = Date.now();
+    finalRt.isChecking = false;
+    await setRuntime(finalRt);
+    if (message !== "stop") { // Don't overwrite "stopped" log with "complete"
+      addLog(`✅ チェック完了（${changedCount}件の変更を検知）`);
+    }
+    chrome.action.setBadgeText({ text: changedCount > 0 ? String(Math.min(99, changedCount)) : "" });
+  } finally {
+    queueRunning = false;
+    stopFlag = false;
+  }
+}
 
 // 逐次：同一バッチ内で連続処理
 async function pollOnceAll() {
@@ -245,26 +269,13 @@ async function pollOnceAll() {
   let changedCount = 0;
 
   // Keep service worker alive during long polling
-  const heartbeat = setInterval(() => {
+  heartbeatIntervalId = setInterval(() => {
     chrome.runtime.getPlatformInfo().catch(() => {});
   }, 25 * 1000);
 
   const processQueue = async (index) => {
     if (index >= ids.length || stopFlag) {
-      if (stopFlag) addLog(`⏹️ ユーザーリクエストによりチェックを中断しました。`);
-      clearInterval(heartbeat); // Stop heartbeat
-
-      try {
-        const finalRt = await getRuntime();
-        finalRt.lastRunAt = Date.now();
-        finalRt.isChecking = false;
-        await setRuntime(finalRt);
-        addLog(`✅ チェック完了（${changedCount}件の変更を検知）`);
-        chrome.action.setBadgeText({ text: changedCount > 0 ? String(Math.min(99, changedCount)) : "" });
-      } finally {
-        queueRunning = false;
-        stopFlag = false;
-      }
+      finishPolling(changedCount, stopFlag ? `⏹️ ユーザーリクエストによりチェックを中断しました。` : null);
       return;
     }
 
@@ -399,6 +410,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.tabs.remove(activeCheckTabId).catch(() => {});
         activeCheckTabId = null;
       }
+      // UI state etc. should be reset immediately
+      finishPolling(0, "stop");
       sendResponse({ ok: true });
     } else if (msg?.type === "snapshotFromCS") {
       const res = await handleSnapshotFromCS(msg.payload);
