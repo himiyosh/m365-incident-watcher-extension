@@ -1,0 +1,41 @@
+{
+    "Id": "TM1144210",
+    "Service": "Microsoft Teams",
+    "Classification": "Incident",
+    "StartDateTime": "2025-08-29T06:31:59+00:00",
+    "HighImpact": false,
+    "ImpactDescription": "Users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure",
+    "IsResolved": false,
+    "LastModifiedDateTime": "2025-08-29T18:50:41.683+00:00",
+    "Posts": [
+        {
+            "ContentType": "Html",
+            "Content": "Title: Some users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure\n\nUser impact: Users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure.\n\nCurrent status: We're analyzing system logs to identify the source of the meeting join failures, which will help us determine our next troubleshooting steps.\n\nScope of impact: Your organization is affected by this event, and the issue intermittently impacts some users joining Microsoft Teams meetings in the Virtual Desktop Infrastructure.\n\nNext update by: Friday, August 29, 2025, at 8:30 AM UTC",
+            "CreatedDateTime": "2025-08-29T06:32:43.413+00:00"
+        },
+        {
+            "ContentType": "Html",
+            "Content": "Title: Some users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure\n\nUser impact: Users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure.\n\nCurrent status: We're reviewing Client logs to understand the origin of the meeting join failures and to formulate a mitigation plan.\n \nScope of impact: Your organization is affected by this event, and the issue intermittently impacts some users joining Microsoft Teams meetings in the Virtual Desktop Infrastructure.\n \nNext update by: Friday, August 29, 2025, at 12:30 PM UTC",
+            "CreatedDateTime": "2025-08-29T08:29:22.43+00:00"
+        },
+        {
+            "ContentType": "Html",
+            "Content": "Title: Some users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure\n\nUser impact: Users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure\n\nCurrent status: We're continuing our analysis of client logs. We're also reaching out to your representatives to gather more contextual details on the nature of impact to try and help us reach a root cause analysis and mitigation plan.\n\nScope of impact: Your organization is affected by this event, and the issue intermittently impacts some users joining Microsoft Teams meetings in the Virtual Desktop Infrastructure.\n\nNext update by: Friday, August 29, 2025, at 8:30 PM UTC",
+            "CreatedDateTime": "2025-08-29T11:25:58.587+00:00"
+        },
+        {
+            "ContentType": "Html",
+            "Content": "Title: Some users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure\n\nUser impact: Users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure\n\nCurrent status: Our analysis of the client logs has remained inconclusive. We've reviewed recent service changes and isolated a recent routine service update that aligns with the reported impact time. We're reversing this service change to determine whether this remediates the impact. In tandem, we're reaching out to your organization to collect additional logs that'll capture details regarding your organization's proxy, so that we can investigate whether the proxy is contributing to the impact.\n\nScope of impact: Your organization is affected by this event, and the issue intermittently impacts some users joining Microsoft Teams meetings in the Virtual Desktop Infrastructure.\n\nNext update by: Saturday, August 30, 2025, at 2:00 AM UTC",
+            "CreatedDateTime": "2025-08-29T18:50:41.683+00:00"
+        }
+    ],
+    "LatestMessage": "Title: Some users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure\n\nUser impact: Users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure\n\nCurrent status: Our analysis of the client logs has remained inconclusive. We've reviewed recent service changes and isolated a recent routine service update that aligns with the reported impact time. We're reversing this service change to determine whether this remediates the impact. In tandem, we're reaching out to your organization to collect additional logs that'll capture details regarding your organization's proxy, so that we can investigate whether the proxy is contributing to the impact.\n\nScope of impact: Your organization is affected by this event, and the issue intermittently impacts some users joining Microsoft Teams meetings in the Virtual Desktop Infrastructure.\n\nNext update by: Saturday, August 30, 2025, at 2:00 AM UTC",
+    "Status": "ServiceDegradation",
+    "Title": "Some users are intermittently unable to join Microsoft Teams meeting in the Virtual Desktop Infrastructure",
+    "IsGlobal": false,
+    "AffectedEnvironments": [],
+    "Origin": "Microsoft",
+    "Feature": "Meetings",
+    "FeatureGroup": "Teams Components",
+    "SearchResultType": "incident"
+}

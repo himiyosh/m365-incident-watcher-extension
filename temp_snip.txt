@@ -1,0 +1,6 @@
+
+    
+    newRuntime.prevSnapshot = { ...oldRuntime.prevSnapshot, [incidentId]: oldRuntime.lastSnapshot?.[incidentId] || "" };
+    newRuntime.prevHtml = { ...oldRuntime.prevHtml, [incidentId]: oldRuntime.lastHtml?.[incidentId] || "" };
+    newRuntime.lastChangeAt = { ...oldRuntime.lastChangeAt, [incidentId]: now };
+

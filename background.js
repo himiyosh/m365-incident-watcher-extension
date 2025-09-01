@@ -17,6 +17,8 @@ const DEFAULT_RUNTIME = {
   prevHtml: {},       // html (sanitized)
   lastCheckAt: {},
   lastStatus: {},
+  // incidents with unread changes: { [id]: true }
+  unreadChanges: {},
   lastRunAt: null,
   logs: [],
   isChecking: false
@@ -34,14 +36,16 @@ const ICON_CANDIDATES = [
 ];
 
 async function createNotificationBase(opts) {
+  // Strip unsupported fields from options (e.g., 'id' is not allowed in options)
+  const { id: givenId, ...cleanOpts } = opts || {};
   let lastErr = null;
   for (const getUrl of ICON_CANDIDATES) {
     try {
       const iconUrl = getUrl();
-      const payload = iconUrl ? { ...opts, iconUrl } : { ...opts };
-      const id = opts.id || `n:${Date.now()}`;
+      const payload = iconUrl ? { ...cleanOpts, iconUrl } : { ...cleanOpts };
+      const id = givenId || `n:${Date.now()}`;
       await chrome.notifications.create(id, payload);
-      return { ok: true, used: iconUrl || "(none)" };
+      return { ok: true, used: iconUrl || "(none)", id };
     } catch (e) { lastErr = e; }
   }
   return { ok: false, error: lastErr?.message || String(lastErr) || "unknown" };
@@ -115,6 +119,17 @@ chrome.notifications.onClicked.addListener((clickedId) => {
     const id = clickedId.split(":")[1];
     const url = `https://lynx.office.net/incident/${encodeURIComponent(id)}`;
     chrome.tabs.create({ url });
+    // mark as read when opened from notification
+    (async () => {
+      const rt = await getRuntime();
+      const next = { ...rt, unreadChanges: { ...rt.unreadChanges, [id]: false } };
+      await setRuntime(next);
+      try {
+        const unreadIds = Object.keys(next.unreadChanges || {}).filter(k => next.unreadChanges[k]);
+        const unreadCount = unreadIds.length;
+        chrome.action.setBadgeText({ text: unreadCount > 0 ? String(Math.min(99, unreadCount)) : "" });
+      } catch {}
+    })();
   }
 });
 
@@ -131,7 +146,8 @@ async function notifyChange(incidentId, title, hint) {
     if (!res.ok) {
       addLog(`⚠️ ${incidentId}: 通知の作成に失敗しました: ${res.error}`);
     } else {
-      addLog(`✅ ${incidentId}: 通知を送信しました (アイコン: ${res.used})`);
+      // addLog(`✅ ${incidentId}: 通知を送信しました (アイコン: ${res.used})`);
+      addLog(`✅ ${incidentId}: 通知を送信しました`);
     }
     return res;
   } catch(e) {
@@ -174,11 +190,14 @@ async function handleSnapshotFromCS({ incidentId, title, snapshotText, modifiedD
     console.log(`[${new Date().toISOString()}] Change detected for ${incidentId}. Notifying.`);
     addLog(`🟢 ${incidentId}: 変更を検知しました - 通知を送信します`);
 
+    
     newRuntime.prevSnapshot = { ...oldRuntime.prevSnapshot, [incidentId]: oldRuntime.lastSnapshot?.[incidentId] || "" };
     newRuntime.prevHtml = { ...oldRuntime.prevHtml, [incidentId]: oldRuntime.lastHtml?.[incidentId] || "" };
     newRuntime.lastChangeAt = { ...oldRuntime.lastChangeAt, [incidentId]: now };
+    newRuntime.unreadChanges = { ...oldRuntime.unreadChanges, [incidentId]: true };
 
-    await notifyChange(incidentId, title || `Incident ${incidentId}`, fullNormText.slice(0, 200));
+    // await notifyChange(incidentId, title || `Incident ${incidentId}`, fullNormText.slice(0, 200));
+    await notifyChange(incidentId, title || `Incident ${incidentId}`, `Modified at: ${modifiedDate}`);
   } else {
     addLog(`⚪ ${incidentId}: 変更なし ${!prevDate ? '(初回チェック)' : ''}`);
   }
@@ -246,7 +265,13 @@ async function finishPolling(changedCount = 0, message = null) {
     if (message !== "stop") { // Don't overwrite "stopped" log with "complete"
       addLog(`✅ チェック完了（${changedCount}件の変更を検知）`);
     }
-    chrome.action.setBadgeText({ text: changedCount > 0 ? String(Math.min(99, changedCount)) : "" });
+    try {
+      const unreadIds = Object.keys(finalRt.unreadChanges || {}).filter(k => finalRt.unreadChanges[k]);
+      const unreadCount = unreadIds.length;
+      chrome.action.setBadgeText({ text: unreadCount > 0 ? String(Math.min(99, unreadCount)) : "" });
+    } catch {
+      chrome.action.setBadgeText({ text: "" });
+    }
   } finally {
     addLog("🚩 resetting flags...");
     queueRunning = false;
@@ -429,6 +454,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!incidentId) return sendResponse({ ok: false });
       const url = `https://lynx.office.net/incident/${encodeURIComponent(incidentId)}`;
       await chrome.tabs.create({ url });
+      // mark as read when opened via popup button
+      const rt = await getRuntime();
+      await setRuntime({ ...rt, unreadChanges: { ...rt.unreadChanges, [incidentId]: false } });
+      try {
+        const nextRt = await getRuntime();
+        const unreadIds = Object.keys(nextRt.unreadChanges || {}).filter(k => nextRt.unreadChanges[k]);
+        const unreadCount = unreadIds.length;
+        chrome.action.setBadgeText({ text: unreadCount > 0 ? String(Math.min(99, unreadCount)) : "" });
+      } catch {}
       sendResponse({ ok: true });
     } else if (msg?.type === "getSnapshots") {
       const { incidentId } = msg;
@@ -448,6 +482,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         lastHtml: rt.lastHtml?.[incidentId] || "",
         prevHtml: rt.prevHtml?.[incidentId] || ""
       });
+    } else if (msg?.type === "markRead") {
+      const { incidentId } = msg;
+      if (!incidentId) return sendResponse({ ok: false });
+      const rt = await getRuntime();
+      const next = { ...rt, unreadChanges: { ...rt.unreadChanges, [incidentId]: false } };
+      await setRuntime(next);
+      try {
+        const unreadIds = Object.keys(next.unreadChanges || {}).filter(k => next.unreadChanges[k]);
+        const unreadCount = unreadIds.length;
+        chrome.action.setBadgeText({ text: unreadCount > 0 ? String(Math.min(99, unreadCount)) : "" });
+      } catch {}
+      sendResponse({ ok: true });
     } else if (msg?.type === "testNotify") {
       const base = {
         type: "basic",

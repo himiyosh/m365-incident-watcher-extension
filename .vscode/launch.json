@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Start & Attach Edge (pwa)",
+      "type": "pwa-msedge",
+      "request": "attach",
+      "preLaunchTask": "Start Edge (with remote debugging)",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}",
+      "timeout": 30000
+    }
+    // ,
+    // {
+    //   "name": "Launch Edge (pwa) with extension",
+    //   "type": "pwa-msedge",
+    //   "request": "launch",
+    //   "url": "about:blank",
+    //   "webRoot": "${workspaceFolder}",
+    //   "runtimeExecutable": "msedge",
+    //   "runtimeArgs": [
+    //     "--user-data-dir=${workspaceFolder}/.vscode-edge-profile",
+    //     "--disable-extensions-except=${workspaceFolder}",
+    //     "--load-extension=${workspaceFolder}",
+    //     "--remote-debugging-port=9222"
+    //   ]
+    // },
+    // {
+    //   "name": "Attach to running Edge (pwa)",
+    //   "type": "pwa-msedge",
+    //   "request": "attach",
+    //   "port": 9222,
+    //   "webRoot": "${workspaceFolder}"
+    // }
+  ]
+}

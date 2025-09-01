@@ -64,7 +64,8 @@ function renderTable(state) {
     // === ここがポイント：今回のチェックで緑にするか ===
     // ・「今回の判定」でのみ緑（changed=true）を表示
     // ・過去に一度でも変更があったという履歴 (lastChangeAt) だけでは緑にしない
-    const changedNow = !!(st && st.ok && st.changed === true);
+    const hasUnread = !!(state.unreadChanges && state.unreadChanges[id]);
+    const changedNow = hasUnread || !!(st && st.ok && st.changed === true);
     const statusTxt = st ? (st.ok ? (changedNow ? "変更あり" : "変更なし") : "失敗") : "－";
     const className = st ? (st.ok ? (changedNow ? "ok" : "muted") : "fail") : "muted";
     const icon = changedNow ? "🟢" : (st ? (st.ok ? "⚪" : "❌") : "⚪");
@@ -99,6 +100,7 @@ function renderTable(state) {
   resultBody.querySelectorAll("button[data-prev]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const incidentId = btn.getAttribute("data-prev");
+      try { await chrome.runtime.sendMessage({ type: "markRead", incidentId }); } catch {}
       pvTitle.textContent = `プレビュー: ${incidentId}`;
       pvText.innerHTML = "読み込み中…";
       pvHtml.style.display = "none";
@@ -238,7 +240,8 @@ testNotifyBtn.addEventListener("click", async () => {
   } catch {}
   try {
     const r = await chrome.runtime.sendMessage({ type: "testNotify" });
-    if (r?.ok) setStatus(`🔔 テスト通知を送信しました。通知権限: ${level}（使用: ${r.used || "-"}）`);
+    // if (r?.ok) setStatus(`🔔 テスト通知を送信しました。通知権限: ${level}（使用: ${r.used || "-"}）`);
+    if (r?.ok) setStatus(`🔔 テスト通知を送信しました。通知権限: ${level}`);
     else setStatus(`⚠️ 通知テストに失敗しました。通知権限: ${level}（詳細: ${r?.error || "unknown"}）`);
   } catch (e) {
     setStatus(`⚠️ 通知テストに失敗しました（メッセージ送信エラー）。通知権限: ${level}（詳細: ${e?.message || e}）`);

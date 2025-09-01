@@ -1,0 +1,68 @@
+    1: <!doctype html>
+    2: <html>
+    3: <head>
+    4:   <meta charset="utf-8" />
+    5:   <title>Incident Watcher</title>
+    6:   <link rel="stylesheet" href="popup.css" />
+    7: </head>
+    8: <body>
+    9:   <header class="head">
+   10:     <div class="title">Incident Watcher</div>
+   11:     <div class="sub">M365 Lynx incident monitor</div>
+   12:   </header>
+   13: 
+   14:   <section class="config">
+   15:     <textarea id="ids" rows="5" class="mono" placeholder="TM1139221 TM1234567 ...（空白/改行/カンマ区切り）"></textarea>
+   16:     <div class="toolbar">
+   17:       <label>チェック間隔(分): <input id="interval" type="number" min="1" step="1" class="num"></label>
+   18:       <label><input id="bgEnabled" type="checkbox"> バックグラウンドで監視する</label>
+   19:       <div class="spacer"></div>
+   20:       <button id="saveBtn" class="btn primary">保存</button>
+   21:       <button id="pokeBtn" class="btn">今すぐ検知</button>
+   22:       <button id="stopBtn" class="btn danger" hidden>チェックを停止</button>
+   23:       <button id="testNotifyBtn" class="btn">通知テスト</button>
+   24:       <button id="diagBtn" class="btn">診断</button>
+   25:     </div>
+   26:   </section>
+   27: 
+   28:   <section class="status">
+   29:     <pre id="statusBox" class="mono"></pre>
+   30:   </section>
+   31: 
+   32:   <section class="results">
+   33:     <table class="grid">
+   34:       <thead>
+   35:         <tr><th>ID</th><th>最終チェック</th><th>今回の判定</th><th>備考</th><th>操作</th></tr>
+   36:       </thead>
+   37:       <tbody id="resultBody"></tbody>
+   38:     </table>
+   39:   </section>
+   40: 
+   41:   <!-- プレビュー用モーダル -->
+   42:   <div id="previewModal" class="modal">
+   43:     <div class="card">
+   44:       <div class="cardHead">
+   45:         <div class="mono" id="pvTitle">Preview</div>
+   46:         <button id="pvClose" class="btn">閉じる</button>
+   47:       </div>
+   48:       <div class="tabs">
+   49:         <div class="group">
+   50:           <button id="tabTextLatest"  class="tab active">Text: 最新</button>
+   51:           <button id="tabTextPrev"    class="tab">Text: 前回</button>
+   52:           <button id="tabTextDiff"    class="tab">Text: 差分</button>
+   53:         </div>
+   54:         <div class="group">
+   55:           <button id="tabHtmlLatest"  class="tab">HTML: 最新</button>
+   56:           <button id="tabHtmlPrev"    class="tab">HTML: 前回</button>
+   57:         </div>
+   58:       </div>
+   59:       <div id="pvArea">
+   60:         <pre id="pvText" class="mono"></pre>
+   61:         <iframe id="pvHtml" sandbox="allow-same-origin" class="htmlframe" style="display:none"></iframe>
+   62:       </div>
+   63:     </div>
+   64:   </div>
+   65: 
+   66:   <script src="popup.js"></script>
+   67: </body>
+   68: </html>
